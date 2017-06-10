@@ -1,0 +1,12 @@
+[package]
+name = "box_stream"
+version = "0.1.0"
+authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
+
+[dependencies]
+libc = "0.2"
+libsodium-sys = "0.0.15"
+sodiumoxide = "0.0.15"
+
+[build-dependencies]
+gcc = "0.3"

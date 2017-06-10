@@ -1,0 +1,3 @@
+[submodule "box-stream-c"]
+	path = box-stream-c
+	url = https://github.com/AljoschaMeyer/box-stream-c
