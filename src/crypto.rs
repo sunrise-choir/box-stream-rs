@@ -3,13 +3,19 @@
 
 use sodiumoxide::crypto::secretbox;
 
+/// The size of an encrypted header: The header's mac, the length of the
+/// following packet, and the max of the following packet.
 pub const CYPHER_HEADER_SIZE: usize = secretbox::MACBYTES + 2 + secretbox::MACBYTES;
+/// The maximum allowed size of a single packet passed to `encrypt_packet`.
 pub const MAX_PACKET_SIZE: u16 = 4096;
+/// Same as `MAX_PACKET_SIZE`, but as a `usize`.
+pub const MAX_PACKET_USIZE: usize = MAX_PACKET_SIZE as usize;
 
 /// The result of decrypting a cypher_header. This is
 /// `sodiumoxide::crypto::secretbox::MACBYTES` smaller than the encrypted header
 /// since the leading mac is not needed anymore.
 #[repr(C)]
+#[derive(Debug)]
 pub struct PlainHeader {
     packet_len: u16,
     packet_mac: [u8; secretbox::MACBYTES],
@@ -22,9 +28,9 @@ extern "C" {
                          encryption_key: *const [u8; secretbox::KEYBYTES],
                          nonce: *mut [u8; secretbox::NONCEBYTES]);
 
-    fn bs_final_header(out: *mut [u8; MAX_PACKET_SIZE as usize],
+    fn bs_final_header(out: *mut [u8; CYPHER_HEADER_SIZE],
                        encryption_key: *const [u8; secretbox::KEYBYTES],
-                       nonce: *mut [u8; secretbox::NONCEBYTES]);
+                       nonce: *const [u8; secretbox::NONCEBYTES]);
 
 
     fn bs_is_final_header(plain_header: *const PlainHeader) -> bool;
@@ -55,19 +61,23 @@ extern "C" {
 }
 
 /// Writes the encrypted header and payload for a given plaintext packet into `out`.
+///
 /// `out` must be a pointer to at least `CYPHER_HEADER_SIZE + packet_len` bytes.
+///
+/// `packet_len` must be at most MAX_PACKET_SIZE
 pub unsafe fn encrypt_packet(out: *mut u8,
                              plain_packet: *const u8,
                              packet_len: u16,
                              encryption_key: &[u8; secretbox::KEYBYTES],
                              nonce: &mut [u8; secretbox::NONCEBYTES]) {
+    debug_assert!(packet_len <= MAX_PACKET_SIZE);
     bs_encrypt_packet(out, plain_packet, packet_len, encryption_key, nonce);
 }
 
 /// Writes the final header that signals the end of the box stream into `out`.
-pub unsafe fn final_header(out: &mut [u8; MAX_PACKET_SIZE as usize],
+pub unsafe fn final_header(out: &mut [u8; CYPHER_HEADER_SIZE],
                            encryption_key: &[u8; secretbox::KEYBYTES],
-                           nonce: &mut [u8; secretbox::NONCEBYTES]) {
+                           nonce: &[u8; secretbox::NONCEBYTES]) {
     bs_final_header(out, encryption_key, nonce);
 }
 
