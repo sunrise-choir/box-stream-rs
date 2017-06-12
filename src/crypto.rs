@@ -21,6 +21,16 @@ pub struct PlainHeader {
     packet_mac: [u8; secretbox::MACBYTES],
 }
 
+impl PlainHeader {
+    pub fn get_packet_len(&self) -> u16 {
+        self.packet_len
+    }
+
+    pub fn get_packet_mac(&self) -> [u8; secretbox::MACBYTES] {
+        self.packet_mac
+    }
+}
+
 extern "C" {
     fn bs_encrypt_packet(out: *mut u8,
                          plain_packet: *const u8,
