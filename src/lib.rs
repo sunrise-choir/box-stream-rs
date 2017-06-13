@@ -14,6 +14,9 @@ use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader}
 
 pub mod crypto;
 
+// #[cfg(test)]
+mod test;
+
 // Buffers encrypted bytes, so that the stream can correctly resume even if the
 // underlying stream is unable to write a whole header + packet combination at
 // once.
