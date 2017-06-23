@@ -11,21 +11,18 @@ use super::BoxWriter;
 /// Wraps a writer, encrypting all writes.
 pub struct Boxer<W: Write> {
     inner: W,
-    encryption_key: secretbox::Key,
-    encryption_nonce: secretbox::Nonce,
+    key: secretbox::Key,
+    nonce: secretbox::Nonce,
     buffer: WriterBuffer,
 }
 
 impl<W: Write> Boxer<W> {
     /// Creates a new Boxer, using the supplied key and nonce.
-    pub fn new(inner: W,
-               encryption_key: secretbox::Key,
-               encryption_nonce: secretbox::Nonce)
-               -> Boxer<W> {
+    pub fn new(inner: W, key: secretbox::Key, nonce: secretbox::Nonce) -> Boxer<W> {
         Boxer {
             inner,
-            encryption_key,
-            encryption_nonce,
+            key,
+            nonce,
             buffer: WriterBuffer::new(),
         }
     }
@@ -42,7 +39,7 @@ impl<W: Write> Boxer<W> {
         &mut self.inner
     }
 
-    /// Unwraps this `Encrypter`, returning the underlying writer.
+    /// Unwraps this `Boxer`, returning the underlying writer.
     pub fn into_inner(self) -> W {
         self.inner
     }
@@ -52,8 +49,8 @@ impl<W: Write> Write for Boxer<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         do_write(buf,
                  &mut self.inner,
-                 &self.encryption_key,
-                 &mut self.encryption_nonce,
+                 &self.key,
+                 &mut self.nonce,
                  &mut self.buffer)
     }
 
@@ -65,14 +62,14 @@ impl<W: Write> Write for Boxer<W> {
 impl<W: Write> BoxWriter for Boxer<W> {
     fn shutdown(&mut self) -> io::Result<()> {
         do_shutdown(&mut self.inner,
-                    &self.encryption_key,
-                    &mut self.encryption_nonce,
+                    &self.key,
+                    &mut self.nonce,
                     &mut self.buffer)
     }
 }
 
 //////////////////////////////////
-// Begin implementaiton details //
+// Begin implementation details //
 //////////////////////////////////
 
 const WRITE_BUFFER_SIZE: usize = CYPHER_HEADER_SIZE + MAX_PACKET_USIZE;

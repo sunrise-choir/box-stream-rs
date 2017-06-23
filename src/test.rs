@@ -5,6 +5,10 @@ use super::*;
 use std::io::Write; // , Read
 use std::io::{Error, ErrorKind};
 use std::collections::VecDeque;
+
+use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader};
+use sodiumoxide::crypto::secretbox;
+
 // use test::rand::Rand;
 // use test::rand::distributions::{IndependentSample, Range};
 
@@ -407,9 +411,122 @@ fn test_writer_shutdown() {
     assert_eq!(b.get_ref().inner().len(), 4 + 2 * CYPHER_HEADER_SIZE);
 }
 
+struct TestReader<'a> {
+    data: Vec<u8>,
+    mode_queue: VecDeque<TestReaderMode<'a>>,
+}
+
+// Determines how a test reader should react to a read call
+enum TestReaderMode<'a> {
+    Error(io::Error),
+    Read(&'a [u8]),
+}
+
+impl<'a> TestReader<'a> {
+    fn new() -> TestReader<'a> {
+        TestReader {
+            data: Vec::new(),
+            mode_queue: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, mode: TestReaderMode<'a>) {
+        self.mode_queue.push_front(mode)
+    }
+
+    fn inner(&self) -> &Vec<u8> {
+        &self.data
+    }
+}
+
+impl<'a> Read for TestReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self.mode_queue.pop_back().unwrap() {
+            TestReaderMode::Error(e) => return Err(e),
+            TestReaderMode::Read(data) => {
+                for (i, byte) in data.iter().take(buf.len()).enumerate() {
+                    buf[i] = *byte;
+                }
+                return Ok(cmp::min(data.len(), buf.len()));
+            }
+        }
+    }
+}
+
+// Some test data TODO remove this when not needed anymore
+// let header1 = [181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+//                144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+//                193];
+// let data1 = [231u8, 234, 80, 195, 113, 173, 5, 158];
+// let header2 = [227u8, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+//                197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+//                137];
+// let data2 = [22u8, 134, 141, 191, 19, 113, 211, 114];
+
+// underlying writer errors => Boxer propagates the error
+#[test]
+fn test_reader_error() {
+    let key = sodiumoxide::crypto::secretbox::gen_key();
+    let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
+
+    let mut w = TestReader::new();
+    w.push(TestReaderMode::Error(Error::new(ErrorKind::Interrupted,
+                                            "simulating Interrupted error")));
+    w.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
+    w.push(TestReaderMode::Error(Error::new(ErrorKind::NotFound, "simulating NotFound error")));
+
+    let mut b = Unboxer::new(w, key, nonce);
+
+    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(),
+               ErrorKind::Interrupted);
+    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(),
+               ErrorKind::WouldBlock);
+    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(), ErrorKind::NotFound);
+}
+
+// read slower than the underlying reader => encrypted data is buffered
+#[test]
+fn test_reader_slow_consumer() {
+    let data = [
+        181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+        144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+        193, // end header 1, index: 34
+        231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+        227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+        197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+        137, // end header 2, index: 76
+        22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
+    ];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[..])); // only one read is needed since both packets fit into the internal buffer
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; 6];
+
+    // read 6 bytes: internally, read all data
+    assert_eq!(u.read(&mut buf).unwrap(), 6);
+    assert_eq!(buf, [0, 1, 2, 3, 4, 5]);
+    // read the next 6 bytes (across packet boundaries)
+    assert_eq!(u.read(&mut buf).unwrap(), 6);
+    assert_eq!(buf, [6, 7, 7, 6, 5, 4]);
+    // try to read 6 more bytes, but only 4 are available
+    assert_eq!(u.read(&mut buf).unwrap(), 4);
+    assert_eq!(buf[..4], [3, 2, 1, 0]);
+}
+
+// - slow consumer: read slower than inner, the last read could then read more than available
+// - slow inner: read calls return 0 until buffer could read enough
+
 // ## Unboxer TODO write these tests
 // - underlying reader errors -> Unboxer propagates the error
-// - read more than underlying reader offers -> only read as much as possible
+// - read more than underlying reader offers -> only read as much as possible, across packat boundaries
 // - read more than MAX_PACKET_USIZE -> only fill and return MAX_PACKET_USIZE
 // - read not enough to decrypt -> buffer read bytes and return/fill 0
 //   - when the buffer contains a fully decryptable message, return it (on the same read)

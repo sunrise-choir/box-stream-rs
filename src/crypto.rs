@@ -100,6 +100,7 @@ impl PlainHeader {
 
 /// If this returns true, it decrypts a received header into `out`. Returns false
 /// if the cyper_header was invalid.
+#[must_use]
 pub unsafe fn decrypt_header(out: &mut PlainHeader,
                              cypher_header: &[u8; CYPHER_HEADER_SIZE],
                              decryption_key: &[u8; secretbox::KEYBYTES],
@@ -110,6 +111,7 @@ pub unsafe fn decrypt_header(out: &mut PlainHeader,
 
 /// Same as `decrypt_header`, but writes the result into `cypher_header`. If this
 /// returns true, `cypher_header` can be safely cast to a `PlainHeader`.
+#[must_use]
 pub unsafe fn decrypt_header_inplace(cypher_header: &mut [u8; CYPHER_HEADER_SIZE],
                                      decryption_key: &[u8; secretbox::KEYBYTES],
                                      nonce: &mut [u8; secretbox::NONCEBYTES])
@@ -120,6 +122,7 @@ pub unsafe fn decrypt_header_inplace(cypher_header: &mut [u8; CYPHER_HEADER_SIZE
 /// Decrypts a received packet, given a pointer to the corresponding
 /// plain_header, and writes the result into `out`. Returns false on invalid
 /// input, in which case the content of `out` is unspecified.
+#[must_use]
 pub unsafe fn decrypt_packet(out: *mut u8,
                              cypher_packet: *const u8,
                              plain_header: &PlainHeader,
@@ -130,6 +133,7 @@ pub unsafe fn decrypt_packet(out: *mut u8,
 }
 
 /// Same as `decrypt_packet`, but writes the result into `cypher_packet`.
+#[must_use]
 pub unsafe fn decrypt_packet_inplace(cypher_packet: *mut u8,
                                      plain_header: &PlainHeader,
                                      decryption_key: &[u8; secretbox::KEYBYTES],
