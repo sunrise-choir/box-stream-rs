@@ -444,9 +444,12 @@ impl<'a> Read for TestReader<'a> {
         match self.mode_queue.pop_back().unwrap() {
             TestReaderMode::Error(e) => return Err(e),
             TestReaderMode::Read(data) => {
+                let mut count = 0;
                 for (i, byte) in data.iter().take(buf.len()).enumerate() {
                     buf[i] = *byte;
+                    count += 1;
                 }
+                println!("TestReader: Read {:?}", count);
                 return Ok(cmp::min(data.len(), buf.len()));
             }
         }
@@ -469,19 +472,19 @@ fn test_reader_error() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
 
-    let mut w = TestReader::new();
-    w.push(TestReaderMode::Error(Error::new(ErrorKind::Interrupted,
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::Interrupted,
                                             "simulating Interrupted error")));
-    w.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
-    w.push(TestReaderMode::Error(Error::new(ErrorKind::NotFound, "simulating NotFound error")));
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::NotFound, "simulating NotFound error")));
 
-    let mut b = Unboxer::new(w, key, nonce);
+    let mut u = Unboxer::new(r, key, nonce);
 
-    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(),
+    assert_eq!(u.read(&mut [0; 8]).unwrap_err().kind(),
                ErrorKind::Interrupted);
-    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(),
+    assert_eq!(u.read(&mut [0; 8]).unwrap_err().kind(),
                ErrorKind::WouldBlock);
-    assert_eq!(b.read(&mut [0; 8]).unwrap_err().kind(), ErrorKind::NotFound);
+    assert_eq!(u.read(&mut [0; 8]).unwrap_err().kind(), ErrorKind::NotFound);
 }
 
 // read slower than the underlying reader => encrypted data is buffered
@@ -519,6 +522,58 @@ fn test_reader_slow_consumer() {
     // try to read 6 more bytes, but only 4 are available
     assert_eq!(u.read(&mut buf).unwrap(), 4);
     assert_eq!(buf[..4], [3, 2, 1, 0]);
+}
+
+// read slower than the underlying reader => encrypted data is buffered
+#[test]
+fn test_reader_slow_inner() {
+    let data = [
+        181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+        144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+        193, // end header 1, index: 34
+        231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+        227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+        197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+        137, // end header 2, index: 76
+        22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
+    ];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[0..16]));
+    r.push(TestReaderMode::Read(&data[16..32]));
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
+    r.push(TestReaderMode::Read(&data[32..48]));
+    r.push(TestReaderMode::Read(&data[48..64]));
+    r.push(TestReaderMode::Read(&data[64..80]));
+    r.push(TestReaderMode::Read(&data[80..84]));
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; 6];
+
+    // Read, but inner reader is too slow
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(u.read(&mut buf).unwrap(), 6);
+    assert_eq!(buf, [0, 1, 2, 3, 4, 5]);
+    // read the next 6 bytes, but only two are available
+    assert_eq!(u.read(&mut buf).unwrap(), 2);
+    assert_eq!(buf[..2], [6, 7]);
+    // next inner call to read should happen here
+    // read the next 6 bytes
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap(), 6);
+    assert_eq!(buf, [7, 6, 5, 4, 3, 2]);
+    // read the last 2 bytes, which are buffered already
+    assert_eq!(u.read(&mut buf).unwrap(), 2);
+    assert_eq!(buf[..2], [1, 0]);
 }
 
 // - slow consumer: read slower than inner, the last read could then read more than available

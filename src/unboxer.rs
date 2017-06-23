@@ -81,6 +81,8 @@ enum ReaderBufferMode {
 }
 use self::ReaderBufferMode::*;
 
+// TODO malicious peer could send headers with a length greater than MAX_PACKET_SIZE
+// how should that be handled?
 impl ReaderBuffer {
     fn new() -> ReaderBuffer {
         ReaderBuffer {
@@ -111,6 +113,7 @@ impl ReaderBuffer {
 
         // as long as possible, decrypt cypher_packets and put them into `out`
         loop {
+            println!("self.header_start: {:?}", self.header_start);
             let plain_header = unsafe {
                 // header is already decrypted, this is just a cast
                 &mem::transmute::<[u8;
@@ -123,13 +126,20 @@ impl ReaderBuffer {
             debug_assert!(plain_header.get_packet_len() <= MAX_PACKET_SIZE);
 
             if self.mode == ReadyToDecrypt {
-                // self.offset = CYPHER_HEADER_SIZE as u16;
-
+                println!("{:?}", "decrypting the following packet:");
+                for byte in &self.buffer[self.offset as usize..
+                             self.offset as usize +
+                             plain_header.get_packet_len() as usize] {
+                    print!("{:?}, ", *byte);
+                }
+                println!("{}", "");
                 unsafe {
-                    decrypt_packet_inplace(self.buffer.as_mut_ptr().offset(self.offset as isize),
-                                           plain_header,
-                                           &key.0,
-                                           &mut nonce.0);
+                    debug_assert!(decrypt_packet_inplace(self.buffer
+                                                             .as_mut_ptr()
+                                                             .offset(self.offset as isize),
+                                                         plain_header,
+                                                         &key.0,
+                                                         &mut nonce.0));
                 }
             } // else `self.offset` already points into the plaintext where output should resume
 
@@ -183,12 +193,13 @@ impl ReaderBuffer {
                     // we have a full cypher_header, so decrypt it
                     // TODO check return value of decrypt_header_inplace and handle failure
                     unsafe {
-                        decrypt_header_inplace(&mut *(self.buffer
-                                                          .as_mut_ptr()
-                                                          .offset(self.header_start as isize) as
-                                                      *mut [u8; CYPHER_HEADER_SIZE]),
-                                               &key.0,
-                                               &mut nonce.0);
+                        debug_assert!(decrypt_header_inplace(&mut *(self.buffer
+                                                                        .as_mut_ptr()
+                                                                        .offset(self.header_start as
+                                                                                isize) as
+                                                                    *mut [u8; CYPHER_HEADER_SIZE]),
+                                                             &key.0,
+                                                             &mut nonce.0));
                     }
 
                     println!("{:?}", "decrypted a cypher_header");
@@ -208,6 +219,7 @@ impl ReaderBuffer {
                                       self.buffer.as_mut_ptr(),
                                       (self.length - self.header_start) as usize);
                         }
+                        self.length -= self.header_start;
                         self.header_start = 0;
                         return len as usize;
                     } else {
@@ -217,6 +229,7 @@ impl ReaderBuffer {
                         continue;
                     }
                 } else {
+                    println!("no full cypher_header: {:?}", self.length);
                     // we don't have a full cypher_header
                     // copy all available data to the beginning of the buffer, so that `fill` works correctly
                     unsafe {
@@ -224,7 +237,11 @@ impl ReaderBuffer {
                                   self.buffer.as_mut_ptr(),
                                   (self.length - self.header_start) as usize);
                     }
+                    self.length -= self.header_start;
+                    println!("new length: {:?}", self.length);
                     self.header_start = 0;
+                    self.offset = self.length;
+                    self.mode = WaitingForHeader;
                     return len as usize;
                 }
             }
@@ -242,27 +259,43 @@ impl ReaderBuffer {
         debug_assert!(self.mode == WaitingForHeader || self.mode == WaitingForPacket);
 
         let read = reader.read(&mut self.buffer[self.offset as usize..])?;
+        println!("self.offset: {:?}", self.offset);
+        for byte in &self.buffer[self.offset as usize..self.offset as usize + read] {
+            print!("{:?}, ", *byte);
+        }
         self.offset += read as u16;
         self.length += read as u16;
 
         if self.length < CYPHER_HEADER_SIZE as u16 {
             // this is only reached in mode == WaitingForHeader, so no need to set that again
+            debug_assert!(self.mode == WaitingForHeader);
             return Ok(false);
         } else {
+            for byte in &self.buffer[..CYPHER_HEADER_SIZE] {
+                print!("{:?}, ", *byte);
+            }
+            println!("{}", "\n");
             // TODO check return value of decrypt_header_inplace and handle failure
             unsafe {
-                decrypt_header_inplace(&mut *(self.buffer.as_mut_ptr() as
-                                              *mut [u8; CYPHER_HEADER_SIZE]),
-                                       &key.0,
-                                       &mut nonce.0);
+                println!("{:?}",
+                         decrypt_header_inplace(&mut *(self.buffer.as_mut_ptr() as
+                                                       *mut [u8; CYPHER_HEADER_SIZE]),
+                                                &key.0,
+                                                &mut nonce.0));
             }
+            println!("{:?}", "decrypted in fill");
 
+            println!("self.length: {:?}", self.length);
+            println!("len of cypherpacket: {:?}",
+                     unsafe { *(self.buffer.as_ptr() as *const u16) });
             // true if a full encrypted packet is available
-            if self.length >= unsafe { *(self.buffer.as_ptr() as *const u16) } {
+            if self.length >=
+               CYPHER_HEADER_SIZE as u16 + unsafe { *(self.buffer.as_ptr() as *const u16) } {
                 self.mode = ReadyToDecrypt;
                 self.offset = CYPHER_HEADER_SIZE as u16;
                 return Ok(true);
             } else {
+                println!("{:?}", "hnn?");
                 self.mode = WaitingForPacket;
                 return Ok(false);
             }
@@ -294,6 +327,7 @@ fn do_read<R: Read>(out: &mut [u8],
         println!("{}", "");
         return Ok(tmp);
     } else {
+        println!("{:?}", "no inner read");
         return Ok(0);
     }
     //
