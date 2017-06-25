@@ -221,7 +221,7 @@ impl ReaderBuffer {
                         }
                         self.length -= self.header_start;
                         self.header_start = 0;
-                        return len as usize;
+                        return total_written as usize;
                     } else {
                         // we have a full cypher_packet, so we can decrypt it and continue the same loop
                         println!("{:?}", "continue with the next cypher_packet decryption");
@@ -229,7 +229,9 @@ impl ReaderBuffer {
                         continue;
                     }
                 } else {
-                    println!("no full cypher_header: {:?}", self.length);
+                    println!("no full cypher_header: length: {:?}, offset: {:?}",
+                             self.length,
+                             self.offset);
                     // we don't have a full cypher_header
                     // copy all available data to the beginning of the buffer, so that `fill` works correctly
                     unsafe {
@@ -242,7 +244,7 @@ impl ReaderBuffer {
                     self.header_start = 0;
                     self.offset = self.length;
                     self.mode = WaitingForHeader;
-                    return len as usize;
+                    return total_written as usize;
                 }
             }
         } // end loop

@@ -576,12 +576,39 @@ fn test_reader_slow_inner() {
     assert_eq!(buf[..2], [1, 0]);
 }
 
-// - slow consumer: read slower than inner, the last read could then read more than available
-// - slow inner: read calls return 0 until buffer could read enough
+// read more than one packet in one go
+#[test]
+fn test_reader_fast() {
+    let data = [
+        181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+        144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+        193, // end header 1, index: 34
+        231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+        227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+        197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+        137, // end header 2, index: 76
+        22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
+    ];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data));
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; 32];
+
+    assert_eq!(u.read(&mut buf).unwrap(), 16);
+    assert_eq!(buf[..16],
+               [0u8, 1, 2, 3, 4, 5, 6, 7, 7, 6, 5, 4, 3, 2, 1, 0]);
+}
 
 // ## Unboxer TODO write these tests
-// - underlying reader errors -> Unboxer propagates the error
-// - read more than underlying reader offers -> only read as much as possible, across packat boundaries
+// - read more than underlying reader offers -> only read as much as possible, across packet boundaries
 // - read more than MAX_PACKET_USIZE -> only fill and return MAX_PACKET_USIZE
 // - read not enough to decrypt -> buffer read bytes and return/fill 0
 //   - when the buffer contains a fully decryptable message, return it (on the same read)
