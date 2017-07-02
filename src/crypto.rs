@@ -22,6 +22,13 @@ pub struct PlainHeader {
 }
 
 impl PlainHeader {
+    pub fn new() -> PlainHeader {
+        PlainHeader {
+            packet_len: 0,
+            packet_mac: [0u8; secretbox::MACBYTES],
+        }
+    }
+
     pub fn get_packet_len(&self) -> u16 {
         self.packet_len
     }

@@ -1,7 +1,7 @@
 // Implementation of Boxer, a wrapper for writers that encrypts all writes and handles buffering, flushing etc.
 
 use std::io::Write;
-use std::{io, cmp, slice, mem, u16};
+use std::{io, cmp, mem, u16};
 use sodiumoxide::crypto::secretbox;
 
 use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, encrypt_packet, final_header};
@@ -101,9 +101,13 @@ impl WriterBuffer {
 
     // Adds data to this buffer and returns how many bytes of the data source were added.
     fn fill(&mut self, data: &[u8], key: &secretbox::Key, nonce: &mut secretbox::Nonce) -> u16 {
-        let packet_length = cmp::min(data.len(), MAX_PACKET_USIZE) as u16;
+        let packet_length = cmp::min(data.len() as u16, MAX_PACKET_SIZE);
         self.length = packet_length + CYPHER_HEADER_SIZE as u16;
         self.offset = 0;
+
+        println!("  entered fill, packet_length: {:?}", packet_length);
+        println!("  encryption_nonce: {:?}", nonce);
+        println!("  encrypting: {:?}", &data[..packet_length as usize]);
 
         unsafe {
             encrypt_packet(self.buffer.as_mut_ptr(),
@@ -113,18 +117,25 @@ impl WriterBuffer {
                            &mut nonce.0);
         }
 
+        println!("  result header: {:?}", &self.buffer[..CYPHER_HEADER_SIZE]);
+        println!("  result data: {:?}",
+                 &self.buffer[CYPHER_HEADER_SIZE..CYPHER_HEADER_SIZE + packet_length as usize]);
+        println!("  filled: {:?}", packet_length);
+
         packet_length
     }
 
     // Writes data from the buffer and updates the buffer's data offset.
     fn write_buffered_data<W: Write>(&mut self, writer: &mut W) -> io::Result<usize> {
+        println!("write_buffered_data from {} to {}: {:?}",
+                 self.offset as usize,
+                 self.length as usize,
+                 &self.buffer[self.offset as usize..self.length as usize]);
         let written = writer
-            .write(unsafe {
-                       slice::from_raw_parts(self.buffer.as_ptr().offset(self.offset as isize),
-                                             (self.length - self.offset) as usize)
-                   })?;
-
+            .write(&self.buffer[self.offset as usize..self.length as usize])?;
         self.offset += written as u16;
+        println!("new offset: {:?}", self.offset);
+        println!("written: {:?}", written);
         Ok(written)
     }
 
@@ -145,16 +156,22 @@ fn do_write<W: Write>(data: &[u8],
                       nonce: &mut secretbox::Nonce,
                       buffer: &mut WriterBuffer)
                       -> io::Result<usize> {
+    println!("{:?}", "entering do_write()");
 
     let buffered: u16;
 
     if buffer.is_empty() {
+        println!("{:?}", "buffer is empty");
         buffered = buffer.fill(data, key, nonce);
+        println!("buffered: {:?}", buffered);
     } else {
         buffered = 0;
     }
 
     buffer.write_buffered_data(writer)?;
+    println!("nonce: {:?}", nonce);
+    println!("returning from do_write: {:?}", buffered);
+    println!("{}", "");
     Ok(buffered as usize)
 }
 

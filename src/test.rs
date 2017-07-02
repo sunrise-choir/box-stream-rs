@@ -6,179 +6,12 @@ use std::io::Write; // , Read
 use std::io::{Error, ErrorKind};
 use std::collections::VecDeque;
 
-use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader};
+use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader, decrypt_header,
+             decrypt_packet};
 use sodiumoxide::crypto::secretbox;
 
-// use test::rand::Rand;
-// use test::rand::distributions::{IndependentSample, Range};
-
-// #[derive(Clone)]
-// struct TestStream(VecDeque<u8>);
-//
-// impl Write for TestStream {
-//     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-//         // randomly choose whether to work perfectly, not write at all, error etc.
-//         let rnd = f32::rand(&mut rand::thread_rng());
-//         if rnd <= 0.1 {
-//             return Err(Error::new(ErrorKind::Interrupted, "simulating Interrupted error"));
-//         } else if rnd <= 0.2 {
-//             return Err(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error"));
-//         } else if rnd <= 0.4 && buf.len() >= 1 {
-//             for byte in buf.iter().take(1) {
-//                 self.0.push_back(*byte);
-//             }
-//
-//             return Ok(1);
-//         } else if rnd <= 0.6 && buf.len() >= 2 {
-//             for byte in buf.iter().take(2) {
-//                 self.0.push_back(*byte);
-//             }
-//
-//             return Ok(2);
-//         } else if rnd <= 0.8 {
-//             let num = Range::new(0, buf.len()).ind_sample(&mut rand::thread_rng());
-//
-//             for byte in buf.iter().take(num) {
-//                 self.0.push_back(*byte);
-//             }
-//
-//             return Ok(num);
-//         } else if rnd <= 0.9 {
-//             for byte in buf {
-//                 self.0.push_back(*byte)
-//             }
-//             return Ok(buf.len());
-//         } else {
-//             return Ok(0);
-//         }
-//     }
-//
-//     fn flush(&mut self) -> io::Result<()> {
-//         Ok(())
-//     }
-// }
-//
-// impl Read for TestStream {
-//     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-//         // randomly choose whether to work perfectly, not read at all, error etc.
-//         let rnd = f32::rand(&mut rand::thread_rng());
-//         if rnd <= 0.1 {
-//             return Err(Error::new(ErrorKind::Interrupted, "simulating Interrupted error"));
-//         } else if rnd <= 0.2 {
-//             return Err(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error"));
-//         } else if rnd <= 0.4 && buf.len() >= 1 {
-//             for i in 0..1 {
-//                 buf[i] = self.0.pop_front().unwrap();
-//             }
-//             return Ok(1);
-//         } else if rnd <= 0.6 && buf.len() >= 2 {
-//             for i in 0..2 {
-//                 buf[i] = self.0.pop_front().unwrap();
-//             }
-//             return Ok(2);
-//         } else if rnd <= 0.8 && buf.len() > 0 {
-//             let num: usize = Range::new(0, buf.len()).ind_sample(&mut rand::thread_rng());
-//
-//             for i in 0..num {
-//                 buf[i] = self.0.pop_front().unwrap();
-//             }
-//
-//             return Ok(num);
-//         } else if rnd <= 0.9 {
-//             for i in 0..buf.len() {
-//                 buf[i] = self.0.pop_front().unwrap();
-//             }
-//             return Ok(buf.len());
-//         } else {
-//             return Ok(0);
-//         }
-//     }
-// }
-//
-// // Check that the test streams themselves work correctly.
-// // #[test]
-// fn the_test_streams_work() {
-//     sodiumoxide::init();
-//
-//     let length = 99;
-//
-//     let data = sodiumoxide::randombytes::randombytes(length);
-//     let mut writer = TestStream(VecDeque::new());
-//     let mut reader = TestStream(VecDeque::new());
-//     let mut data_out: Vec<u8> = vec![0; length];
-//
-//     // TODO don't write everthing, write a random amount between 0 and 3 * MAX_PACKET_USIZE
-//     let mut total_written = 0;
-//     while total_written < length {
-//         match writer.write(&data[total_written..]) {
-//             Ok(written) => total_written += written,
-//             Err(_) => {}
-//         }
-//     }
-//
-//     reader = writer.clone();
-//
-//     // TODO interleave reading and writing: For each write, perform two reads, then repeat until done
-//     let mut total_read = 0;
-//     while total_read < length {
-//         match reader.read(&mut data_out[total_read..]) {
-//             Ok(read) => {
-//                 total_read += read;
-//             }
-//             Err(_) => {}
-//         }
-//     }
-//
-//     for (i, byte) in data_out.iter().enumerate() {
-//         assert_eq!(*byte, data[i]);
-//     }
-// }
-//
-// // Encrypt and decrypt data across test readers and writers, resulting in the identity function.
-// // #[test]
-// fn encrypt_decrypt() {
-//     sodiumoxide::init();
-//
-//     let length = 99999;
-//
-//     let data = sodiumoxide::randombytes::randombytes(length);
-//     let mut inner_writer = TestStream(VecDeque::new());
-//     let mut inner_reader = TestStream(VecDeque::new());
-//     let mut data_out: Vec<u8> = vec![0; length];
-//
-//     let key1 = sodiumoxide::crypto::secretbox::gen_key();
-//     let key2 = key1.clone();
-//     let mut nonce1 = sodiumoxide::crypto::secretbox::gen_nonce();
-//     let mut nonce2 = nonce1.clone();
-//
-//     let mut writer = Boxer::new(inner_writer, key1, nonce1);
-//
-//     let mut total_written = 0;
-//     while total_written < length {
-//         match writer.write(&data[total_written..]) {
-//             Ok(written) => total_written += written,
-//             Err(_) => {}
-//         }
-//     }
-//
-//     inner_reader = writer.into_inner().clone();
-//
-//     let mut reader = Unboxer::new(inner_reader, key2, nonce2);
-//
-//     let mut total_read = 0;
-//     while total_read < length {
-//         match reader.read(&mut data_out[total_read..]) {
-//             Ok(read) => {
-//                 total_read += read;
-//             }
-//             Err(_) => {}
-//         }
-//     }
-//
-//     for (i, byte) in data_out.iter().enumerate() {
-//         assert_eq!(*byte, data[i]);
-//     }
-// }
+use test::rand::Rand;
+use test::rand::distributions::{IndependentSample, Range};
 
 struct TestWriter {
     data: Vec<u8>,
@@ -212,18 +45,27 @@ impl TestWriter {
     fn get_flush_count(&self) -> usize {
         self.flush_count
     }
+
+    fn remaining_writes(&self) -> usize {
+        self.mode_queue.len()
+    }
 }
 
 impl Write for TestWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.mode_queue.pop_back().unwrap() {
-            TestWriterMode::Error(e) => return Err(e),
-            TestWriterMode::Write(length) => {
-                for byte in buf.iter().take(length) {
-                    self.data.push(*byte);
+        match self.mode_queue.pop_back() {
+            Some(mode) => {
+                match mode {
+                    TestWriterMode::Error(e) => return Err(e),
+                    TestWriterMode::Write(length) => {
+                        for byte in buf.iter().take(length) {
+                            self.data.push(*byte);
+                        }
+                        return Ok(cmp::min(length, buf.len()));
+                    }
                 }
-                return Ok(cmp::min(length, buf.len()));
             }
+            None => self.data.write(buf),
         }
     }
 
@@ -234,7 +76,7 @@ impl Write for TestWriter {
 }
 
 // underlying writer errors => Boxer propagates the error
-#[test]
+// #[test]
 fn test_writer_error() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -253,10 +95,13 @@ fn test_writer_error() {
 }
 
 // write more than underlying writer can accept but less than MAX_PACKET_USIZE => writer buffers encrypted data and on subsequent writes ignores its input and writes from the buffer instead (returning 0)
-#[test]
+// #[test]
 fn test_writer_slow() {
-    let key = sodiumoxide::crypto::secretbox::gen_key();
-    let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
     let mut w = TestWriter::new();
     for write_size in &[8 + CYPHER_HEADER_SIZE,
@@ -291,7 +136,7 @@ fn test_writer_slow() {
     // w writes 0, remaining 4 bytes are buffered
     assert_eq!(b.write(&[16, 17, 18, 19]).unwrap(), 4);
     // w is able to write 8, but is only given the 4 buffered bytes
-    assert_eq!(b.write(&[20, 21, 22, 23]).unwrap(), 0);
+    assert_eq!(b.write(&[20, 21, 22, 23]).unwrap(), 0); // 20..23 is never written
     // w is able to write 8 and buffer is empty, so write all 4 <= 8 given bytes
     assert_eq!(b.write(&[24, 25, 26, 27]).unwrap(), 4);
     // w is able to write 8 and buffer is empty, so write all 4 <= 8 given bytes
@@ -302,10 +147,30 @@ fn test_writer_slow() {
     assert_eq!(b.write(&[36]).unwrap(), 0);
     // buffer was emptied, now write the last byte
     assert_eq!(b.write(&[36]).unwrap(), 1);
+
+    let expected_cyphertext = [61u8, 15, 75, 215, 49, 221, 145, 94, 210, 86, 132, 5, 19, 245, 207,
+                                163, 144, 166, 202, 157, 144, 125, 36, 237, 220, 243, 133, 48, 64,
+                                121, 61, 129, 78, 169, // end of first cypher_header
+                                231, 234, 80, 195, 113, 173, 5, 158, 68, 87,
+                                13, 241, 200, 89, 252, 34, // end of first packet
+                                95, 207, 184, 63, 123, 43, 109, 237, 152, 124, 246, 140, 225, 220, 127, 245, 163, 201, 42, 164, 121, 84, 82, 21, 210, 18, 28, 193, 112, 92, 94, 16, 51, 30, // end of 2nd header
+                                1, 145, 154, 168, // end of 2nd packet
+                                228, 160, 88, 229, 5, 90, 216, 89, 132, 168, 50, 140, 198, 168, 75, 23, 194, 193, 144, 27, 38, 172, 205, 94, 88, 246, 108, 158, 14, 236, 33, 181, 17, 105, // end of 3rd header
+                                101, 0, 171, 8, // end of 3rd packet
+                                226, 89, 192, 220, 247, 198, 210, 14, 22, 248, 202, 211, 215, 16, 105, 81, 72, 143, 123, 179, 193, 142, 129, 69, 190, 21, 6, 181, 143, 117, 52, 64, 189, 43, // end of 4th header
+                                211, 129, 89, 114, // end of 4th packet
+                                39, 213, 72, 104, 107, 122, 225, 122, 88, 83, 134, 58, 108, 252, 169, 238, 21, 59, 181, 139, 104, 159, 159, 28, 24, 133, 238, 208, 201, 76, 18, 109, 222, 228, // end of 5th header
+                                200, 107, 197, 134, // end of 5th packet
+                                146, 221, 154, 151, 159, 226, 234, 187, 46, 165, 165, 221, 14, 13, 154, 8, 61, 45, 28, 29, 45, 15, 121, 27, 89, 254, 131, 70, 68, 127, 117, 220, 145, 118, // end of 6th header
+                                229, // end of 6th packet
+                              ];
+
+    // check the produced cyphertext
+    assert_eq!(b.into_inner().data[..], expected_cyphertext[..]);
 }
 
 // error propagation does not interfer with buffering
-#[test]
+// #[test]
 fn test_writer_error_while_buffering() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -330,16 +195,52 @@ fn test_writer_error_while_buffering() {
 }
 
 // write more than MAX_PACKET_USIZE => only buffer up to MAX_PACKET_USIZE, even if underlying writer could write more then MAX_PACKET_USIZE
-#[test]
+// #[test]
 fn test_writer_larger_then_buffer() {
-    let key = sodiumoxide::crypto::secretbox::gen_key();
-    let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut w = TestWriter::new();
+    for write_size in &[CYPHER_HEADER_SIZE + MAX_PACKET_USIZE,
+                        CYPHER_HEADER_SIZE + MAX_PACKET_USIZE] {
+        w.push(TestWriterMode::Write(*write_size));
+    }
+
+    let mut b = Boxer::new(w, key, nonce);
+
+    let plain_data = [0u8; MAX_PACKET_USIZE + 42];
+
+    // write more than MAX_PACKET_USIZE => CYPHER_HEADER_SIZE + MAX_PACKET_USIZE get written to w
+    assert_eq!(b.write(&plain_data[..]).unwrap(), MAX_PACKET_USIZE);
+    assert_eq!(b.write(&plain_data[MAX_PACKET_USIZE..]).unwrap(), 42);
+
+    let expected_cyphertext =
+        [19, 249, 30, 100, 146, 232, 74, 49, 176, 123, 152, 216, 219, 226, 92, 225, 163, 231, 125,
+         1, 136, 38, 195, 181, 101, 192, 136, 180, 67, 159, 242, 67, 211, 5, 17, 128, 136, 187,
+         16, 115, 210, 114, 135, 93, 112, 234, 37, 90, 179, 149, 175, 241, 3, 40, 2, 154, 233,
+         180, 200, 45, 28, 5, 17, 83, 19, 144, 47, 158, 212, 86, 132, 18, 230, 200, 28, 238];
+
+    assert_eq!(b.into_inner().data[CYPHER_HEADER_SIZE + MAX_PACKET_USIZE..],
+               expected_cyphertext[..]);
+}
+
+// write more than MAX_PACKET_USIZE => only buffer up to MAX_PACKET_USIZE, even if underlying writer could write more then MAX_PACKET_USIZE
+// #[test]
+fn test_writer_larger_then_buffer_fancy() {
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
     let mut w = TestWriter::new();
     for write_size in &[4,
                         CYPHER_HEADER_SIZE + MAX_PACKET_USIZE,
                         CYPHER_HEADER_SIZE + MAX_PACKET_USIZE + 42,
-                        CYPHER_HEADER_SIZE + 84] {
+                        CYPHER_HEADER_SIZE + 200] {
         w.push(TestWriterMode::Write(*write_size));
     }
 
@@ -354,10 +255,21 @@ fn test_writer_larger_then_buffer() {
     assert_eq!(b.write(&[1; MAX_PACKET_USIZE + 42]).unwrap(),
                MAX_PACKET_USIZE);
     // buffer is empty now, so the next write can succeed immediately
-    assert_eq!(b.write(&[2; 63]).unwrap(), 63);
+    assert_eq!(b.write(&[2; 64]).unwrap(), 64);
+
+    let expected_cyphertext = [220u8, 125, 131, 229, 3, 70, 236, 229, 35, 197, 228, 69, 47, 71,
+                               141, 69, 194, 133, 204, 239, 127, 152, 1, 59, 108, 140, 163, 94,
+                               199, 10, 229, 200, 237, 154, 127, 27, 179, 17, 125, 177, 213, 115,
+                               203, 34, 79, 137, 110, 213, 167, 152, 177, 7, 133, 62, 110, 151,
+                               231, 255, 65, 204, 40, 72, 139, 241, 195, 143, 61, 233, 106, 118,
+                               143, 166, 252, 37, 235, 178, 211, 240, 46, 5, 213, 213, 75, 161,
+                               72, 135, 215, 229, 186, 103, 62, 254, 137, 168, 243, 221, 225, 83];
+
+    assert_eq!(b.into_inner().data[(CYPHER_HEADER_SIZE + MAX_PACKET_USIZE) * 2..],
+               expected_cyphertext[..]);
 }
 
-#[test]
+// #[test]
 fn test_writer_flush() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -382,7 +294,7 @@ fn test_writer_flush() {
     assert_eq!(b.get_ref().get_flush_count(), 1);
 }
 
-#[test]
+// #[test]
 fn test_writer_shutdown() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -412,7 +324,7 @@ fn test_writer_shutdown() {
 }
 
 struct TestReader<'a> {
-    data: Vec<u8>,
+    // data: Vec<u8>,
     mode_queue: VecDeque<TestReaderMode<'a>>,
 }
 
@@ -425,7 +337,7 @@ enum TestReaderMode<'a> {
 impl<'a> TestReader<'a> {
     fn new() -> TestReader<'a> {
         TestReader {
-            data: Vec::new(),
+            // data: Vec::new(),
             mode_queue: VecDeque::new(),
         }
     }
@@ -433,41 +345,52 @@ impl<'a> TestReader<'a> {
     fn push(&mut self, mode: TestReaderMode<'a>) {
         self.mode_queue.push_front(mode)
     }
-
-    fn inner(&self) -> &Vec<u8> {
-        &self.data
-    }
+    //
+    // fn inner(&self) -> &Vec<u8> {
+    //     &self.data
+    // }
+    //
+    // fn inner_mut(&mut self) -> &mut Vec<u8> {
+    //     &mut self.data
+    // }
 }
 
 impl<'a> Read for TestReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self.mode_queue.pop_back().unwrap() {
-            TestReaderMode::Error(e) => return Err(e),
-            TestReaderMode::Read(data) => {
-                let mut count = 0;
-                for (i, byte) in data.iter().take(buf.len()).enumerate() {
-                    buf[i] = *byte;
-                    count += 1;
+        match self.mode_queue.pop_back() {
+            None => Err(Error::new(ErrorKind::UnexpectedEof, "reached end of TestReader")),
+            Some(mode) => {
+                match mode {
+                    TestReaderMode::Error(e) => return Err(e),
+                    TestReaderMode::Read(data) => {
+                        let mut count = 0;
+                        for (i, byte) in data.iter().take(buf.len()).enumerate() {
+                            buf[i] = *byte;
+                            count += 1;
+                        }
+                        println!("TestReader: Read {:?}", count);
+                        return Ok(cmp::min(data.len(), buf.len()));
+                    }
                 }
-                println!("TestReader: Read {:?}", count);
-                return Ok(cmp::min(data.len(), buf.len()));
             }
         }
+        // match self.mode_queue.pop_back().unwrap() {
+        //     TestReaderMode::Error(e) => return Err(e),
+        //     TestReaderMode::Read(data) => {
+        //         let mut count = 0;
+        //         for (i, byte) in data.iter().take(buf.len()).enumerate() {
+        //             buf[i] = *byte;
+        //             count += 1;
+        //         }
+        //         println!("TestReader: Read {:?}", count);
+        //         return Ok(cmp::min(data.len(), buf.len()));
+        //     }
+        // }
     }
 }
 
-// Some test data TODO remove this when not needed anymore
-// let header1 = [181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
-//                144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
-//                193];
-// let data1 = [231u8, 234, 80, 195, 113, 173, 5, 158];
-// let header2 = [227u8, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
-//                197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
-//                137];
-// let data2 = [22u8, 134, 141, 191, 19, 113, 211, 114];
-
 // underlying writer errors => Boxer propagates the error
-#[test]
+// #[test]
 fn test_reader_error() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -488,7 +411,7 @@ fn test_reader_error() {
 }
 
 // read slower than the underlying reader => encrypted data is buffered
-#[test]
+// #[test]
 fn test_reader_slow_consumer() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -525,7 +448,7 @@ fn test_reader_slow_consumer() {
 }
 
 // read slower than the underlying reader => encrypted data is buffered
-#[test]
+// #[test]
 fn test_reader_slow_inner() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -577,7 +500,7 @@ fn test_reader_slow_inner() {
 }
 
 // read more than one packet in one go
-#[test]
+// #[test]
 fn test_reader_fast() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -607,11 +530,107 @@ fn test_reader_fast() {
                [0u8, 1, 2, 3, 4, 5, 6, 7, 7, 6, 5, 4, 3, 2, 1, 0]);
 }
 
+// read more than one packet, landing in the middle of a header
+// #[test]
+fn test_reader_fast2() {
+    let data = [
+        181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+        144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+        193, // end header 1, index: 34
+        231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+        227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+        197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+        137, // end header 2, index: 76
+        22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
+    ];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[..70]));
+    r.push(TestReaderMode::Read(&data[70..72]));
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
+    r.push(TestReaderMode::Read(&data[72..]));
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; 16];
+
+    assert_eq!(u.read(&mut buf).unwrap(), 8);
+    assert_eq!(buf[..8], [0, 1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(u.read(&mut buf).unwrap(), 8);
+    assert_eq!(buf[..8], [7, 6, 5, 4, 3, 2, 1, 0]);
+}
+
+// read more than MAX_PACKET_SIZE -> only read MAX_PACKET_SIZE
+// #[test]
+fn test_reader_max_size() {
+    let plain_data = [0u8; MAX_PACKET_USIZE + 42];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut inner = Vec::new();
+    let mut b = Boxer::new(inner, key.clone(), nonce.clone());
+
+    assert!(b.write_all(&plain_data).is_ok());
+    let data = b.into_inner();
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[..]));
+    r.push(TestReaderMode::Read(&data[CYPHER_HEADER_SIZE + MAX_PACKET_USIZE..]));
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; MAX_PACKET_USIZE + 42];
+
+    assert_eq!(u.read(&mut buf).unwrap(), MAX_PACKET_USIZE);
+    assert_eq!(buf[..MAX_PACKET_USIZE], plain_data[..MAX_PACKET_USIZE]);
+    assert_eq!(u.read(&mut buf).unwrap(), 42);
+    assert_eq!(buf[..42], plain_data[MAX_PACKET_USIZE..]);
+}
+
+// unboxer reads two packets, second one does not fit into buffer, then call read with large out buffer
+// #[test]
+fn test_reader_partially_buffered_packet() {
+    let plain_data = [0u8; 3000];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut inner = Vec::new();
+    let mut b = Boxer::new(inner, key.clone(), nonce.clone());
+
+    assert!(b.write(&plain_data).is_ok());
+    assert!(b.write(&plain_data).is_ok());
+    let data = b.into_inner();
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[..]));
+    r.push(TestReaderMode::Read(&data[CYPHER_HEADER_SIZE + MAX_PACKET_USIZE..]));
+
+    let mut u = Unboxer::new(r, key, nonce);
+    let mut buf = [0u8; MAX_PACKET_USIZE + 42];
+
+    assert_eq!(u.read(&mut buf).unwrap(), 3000);
+    assert_eq!(buf[..3000], plain_data[..3000]);
+    assert_eq!(u.read(&mut buf).unwrap(), 3000);
+    assert_eq!(buf[..3000], plain_data[..3000]);
+}
+
 // ## Unboxer TODO write these tests
-// - read more than underlying reader offers -> only read as much as possible, across packet boundaries
-// - read more than MAX_PACKET_USIZE -> only fill and return MAX_PACKET_USIZE
-// - read not enough to decrypt -> buffer read bytes and return/fill 0
-//   - when the buffer contains a fully decryptable message, return it (on the same read)
+// - handle end of stream
+// - handling malicious peers (packets > MAX_PACKET_SIZE, packets with too long packet length)
 
 // How Boxer and Unboxer work
 //
@@ -626,4 +645,445 @@ fn test_reader_fast() {
 // - decrypt the message in-place and return it on reads
 // - when the buffered message has been fully read, pull more data from the underlying reader
 
-// TODO test that composing boxer and unboxer yields the identity stream, use randomly behaving underlying writer and reader
+// struct OwningTestReader {
+//     mode_queue: VecDeque<OwningTestReaderMode>,
+// }
+//
+// // Determines how a test reader should react to a read call
+// enum OwningTestReaderMode {
+//     Error(io::Error),
+//     Read(Vec<u8>),
+// }
+//
+// impl OwningTestReader {
+//     fn new() -> OwningTestReader {
+//         OwningTestReader { mode_queue: VecDeque::new() }
+//     }
+//
+//     fn push(&mut self, mode: OwningTestReaderMode) {
+//         self.mode_queue.push_front(mode)
+//     }
+// }
+//
+// impl Read for OwningTestReader {
+//     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+//         match self.mode_queue.pop_back() {
+//             None => Err(Error::new(ErrorKind::UnexpectedEof, "reached end of OwningTestReader")),
+//             Some(mode) => {
+//                 match mode {
+//                     OwningTestReaderMode::Error(e) => return Err(e),
+//                     OwningTestReaderMode::Read(data) => {
+//                         let mut count = 0;
+//                         for (i, byte) in data.iter().take(buf.len()).enumerate() {
+//                             buf[i] = *byte;
+//                             count += 1;
+//                         }
+//                         println!("OwnedTestReader: Read {:?}", count);
+//                         return Ok(cmp::min(data.len(), buf.len()));
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+
+// write data with a randomly behaving inner writer, and ensure it writes correctly
+// #[test]
+fn test_writer_random() {
+    // number of writes to test
+    let writes = 1000;
+
+    let plain_data = [42u8; MAX_PACKET_USIZE + 500];
+    let mut cypher_text: Vec<u8> = Vec::new();
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut w = TestWriter::new();
+    for i in 0..writes {
+        let rnd = f32::rand(&mut rand::thread_rng());
+
+        if rnd < 0.1 {
+            w.push(TestWriterMode::Error(Error::new(ErrorKind::Interrupted,
+                                                    "simulating Interrupted error")));
+        } else if rnd < 0.2 {
+            w.push(TestWriterMode::Error(Error::new(ErrorKind::WouldBlock,
+                                                    "simulating WouldBlock error")));
+        } else if rnd < 0.3 {
+            w.push(TestWriterMode::Write(MAX_PACKET_USIZE));
+        } else if rnd < 0.4 {
+            w.push(TestWriterMode::Write(MAX_PACKET_USIZE + 200));
+        } else if rnd < 0.5 {
+            w.push(TestWriterMode::Write(0));
+        } else if rnd < 0.6 {
+            w.push(TestWriterMode::Write(3));
+        } else {
+            let rnd2 = f32::rand(&mut rand::thread_rng());
+            w.push(TestWriterMode::Write((rnd2 * (MAX_PACKET_USIZE + 42) as f32) as usize));
+        }
+    }
+
+    let mut b = Boxer::new(w, key.clone(), nonce.clone());
+
+    // perform the encryption
+    while b.get_ref().remaining_writes() > 0 {
+        let rnd = f32::rand(&mut rand::thread_rng());
+        // some of these get ignored because the TestWrite might be too slow
+        b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]);
+    }
+    b.flush();
+    cypher_text.extend(b.get_ref().inner());
+
+    // decrypt everything
+    let mut decryption_key = key.clone();
+    let mut decryption_nonce = nonce.clone();
+    let mut offset = 0usize;
+    let mut decrypted_header = PlainHeader::new();
+    let mut decrypted_packet = [0u8; MAX_PACKET_USIZE];
+
+    while offset < cypher_text.len() {
+        unsafe {
+            assert!(decrypt_header(&mut decrypted_header,
+                                   &*(cypher_text.as_ptr().offset(offset as isize) as
+                                      *const [u8; CYPHER_HEADER_SIZE]),
+                                   &decryption_key.0,
+                                   &mut decryption_nonce.0));
+        }
+        offset += CYPHER_HEADER_SIZE;
+
+        unsafe {
+            assert!(decrypt_packet(&mut decrypted_packet as *mut [u8; MAX_PACKET_USIZE] as
+                                   *mut u8,
+                                   cypher_text.as_ptr().offset(offset as isize),
+                                   &decrypted_header,
+                                   &decryption_key.0,
+                                   &mut decryption_nonce.0));
+        }
+
+        offset += decrypted_header.get_packet_len() as usize;
+
+        for byte in &decrypted_packet[..decrypted_header.get_packet_len() as usize] {
+            assert_eq!(*byte, 42u8);
+        }
+        decrypted_packet = [0u8; MAX_PACKET_USIZE];
+    }
+}
+
+// read data with a randomly behaving inner reader, and ensure it reads correctly
+#[test]
+fn test_reader_random() {
+    // number of writes to test
+    let writes = 1000;
+
+    let plain_data = [42u8; MAX_PACKET_USIZE + 500];
+    let mut cypher_text: Vec<u8> = Vec::new();
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut w = TestWriter::new();
+    for i in 0..writes {
+        let rnd = f32::rand(&mut rand::thread_rng());
+
+        if rnd < 0.1 {
+            w.push(TestWriterMode::Error(Error::new(ErrorKind::Interrupted,
+                                                    "simulating Interrupted error")));
+        } else if rnd < 0.2 {
+            w.push(TestWriterMode::Error(Error::new(ErrorKind::WouldBlock,
+                                                    "simulating WouldBlock error")));
+        } else if rnd < 0.3 {
+            w.push(TestWriterMode::Write(MAX_PACKET_USIZE));
+        } else if rnd < 0.4 {
+            w.push(TestWriterMode::Write(MAX_PACKET_USIZE + 200));
+        } else if rnd < 0.5 {
+            w.push(TestWriterMode::Write(0));
+        } else if rnd < 0.6 {
+            w.push(TestWriterMode::Write(3));
+        } else {
+            let rnd2 = f32::rand(&mut rand::thread_rng());
+            w.push(TestWriterMode::Write((rnd2 * (MAX_PACKET_USIZE + 42) as f32) as usize));
+        }
+    }
+
+    let mut b = Boxer::new(w, key.clone(), nonce.clone());
+
+    let mut total_written = 0usize;
+    // perform the encryption
+    while b.get_ref().remaining_writes() > 0 {
+        let rnd = f32::rand(&mut rand::thread_rng());
+        // some of these get ignored because the TestWrite might be too slow
+        match b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]) {
+            Ok(amount) => total_written += amount,
+            Err(_) => {}
+        }
+    }
+    b.flush();
+    cypher_text.extend(b.get_ref().inner());
+    println!("cypher_text: {:?}", cypher_text);
+    println!("cypher_text.len(): {:?}", cypher_text.len());
+
+    // decrypt everything
+    let mut r = RandomReader::new(cypher_text);
+    let mut u = Unboxer::new(r, key.clone(), nonce.clone());
+
+    let mut total_read = 0usize;
+    while total_read < total_written {
+        let mut decrypted = [0u8; MAX_PACKET_USIZE];
+        match u.read(&mut decrypted) {
+            Err(_) => {}
+            Ok(amount) => {
+                total_read += amount;
+                println!("read {:?}", amount);
+                assert_eq!(decrypted[..amount], plain_data[..amount]);
+            }
+        }
+    }
+    println!("total_read: {:?}", total_read);
+}
+
+// sequentially reads from an owned buffer, reads random amounts (and sometimes errors)
+struct RandomReader {
+    data: Vec<u8>,
+    offset: usize,
+}
+
+impl RandomReader {
+    fn new(data: Vec<u8>) -> RandomReader {
+        RandomReader { data, offset: 0 }
+    }
+
+    fn has_data(&self) -> bool {
+        self.offset < self.data.len()
+    }
+}
+
+impl Read for RandomReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if !self.has_data() {
+            panic!("Check `has_data` before calling read...");
+        }
+
+        let rnd = f32::rand(&mut rand::thread_rng());
+        if rnd < 0.1 {
+            return Err(Error::new(ErrorKind::Interrupted, "simulating Interrupted error"));
+        } else if rnd < 0.2 {
+            return Err(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error"));
+        } else if rnd < 0.3 {
+            let amount = cmp::min(cmp::min(buf.len(), MAX_PACKET_USIZE), self.data.len());
+            for (i, byte) in self.data[self.offset..
+                cmp::min(self.offset + amount, self.data.len())]
+                        .iter()
+                        .enumerate() {
+                buf[i] = *byte;
+            }
+            self.offset += amount;
+            return Ok(amount);
+        } else if rnd < 0.4 {
+            let amount = cmp::min(cmp::min(buf.len(), MAX_PACKET_USIZE + 200), self.data.len());
+            for (i, byte) in self.data[self.offset..
+                cmp::min(self.offset + amount, self.data.len())]
+                        .iter()
+                        .enumerate() {
+                buf[i] = *byte;
+            }
+            self.offset += amount;
+            return Ok(amount);
+        } else if rnd < 0.5 {
+            return Ok(0);
+        } else if rnd < 0.6 {
+            let amount = cmp::min(cmp::min(buf.len(), 3), self.data.len());
+            for (i, byte) in self.data[self.offset..
+                cmp::min(self.offset + amount, self.data.len())]
+                        .iter()
+                        .enumerate() {
+                buf[i] = *byte;
+            }
+            self.offset += amount;
+            return Ok(amount);
+        } else {
+            let rnd2 = f32::rand(&mut rand::thread_rng());
+            let amount = cmp::min(cmp::min(buf.len(),
+                                           (rnd2 * (MAX_PACKET_USIZE + 42) as f32) as usize),
+                                  self.data.len());
+            for (i, byte) in self.data[self.offset..
+                cmp::min(self.offset + amount, self.data.len())]
+                        .iter()
+                        .enumerate() {
+                buf[i] = *byte;
+            }
+            self.offset += amount;
+            return Ok(amount);
+        }
+    }
+}
+
+// // TODO remove this
+// #[test]
+// fn test_reader_fast_tmp() {
+//     let data = [
+//         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+//         144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+//         193, // end header 1, index: 34
+//         231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+//         227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
+//         197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
+//         137, // end header 2, index: 76
+//         22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
+//     ];
+//
+//     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+//                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+//                               7, 34, 157, 174, 24]);
+//     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+//                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+//
+//     let mut r = TestReader::new();
+//     r.push(TestReaderMode::Read(&data));
+//
+//     let mut u = Unboxer::new(r, key, nonce);
+//     let mut buf = [0u8; 32];
+//
+//     assert_eq!(u.read(&mut buf).unwrap(), 0);
+//     assert_eq!(u.read(&mut buf).unwrap(), 0);
+//     assert_eq!(u.read(&mut buf).unwrap(), 8);
+//     assert_eq!(buf[..8], [0u8, 1, 2, 3, 4, 5, 6, 7]);
+//     assert_eq!(u.read(&mut buf).unwrap(), 0);
+//     assert_eq!(u.read(&mut buf).unwrap(), 8);
+//     assert_eq!(buf[..8], [7u8, 6, 5, 4, 3, 2, 1, 0]);
+// }
+
+// // compose boxer and unboxer to get the identity stream TODO delete this
+// // #[test]
+// fn test_composition() {
+//     // number of writes to test
+//     let writes = 1; // TODO increase this
+//
+//     let mut cypher_text: Vec<u8> = Vec::new();
+//     let mut decrypted: Vec<u8> = Vec::new();
+//
+//     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+//                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+//                               7, 34, 157, 174, 24]);
+//     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+//                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+//
+//     let plain_data = [42u8; MAX_PACKET_USIZE + 500];
+//
+//     let mut w = TestWriter::new();
+//     for i in 0..writes {
+//         let rnd = f32::rand(&mut rand::thread_rng());
+//
+//         if rnd < 0.1 {
+//             w.push(TestWriterMode::Error(Error::new(ErrorKind::Interrupted,
+//                                                     "simulating Interrupted error")));
+//         } else if rnd < 0.2 {
+//             w.push(TestWriterMode::Error(Error::new(ErrorKind::WouldBlock,
+//                                                     "simulating WouldBlock error")));
+//         } else if rnd < 0.3 {
+//             w.push(TestWriterMode::Write(MAX_PACKET_USIZE));
+//         } else if rnd < 0.4 {
+//             w.push(TestWriterMode::Write(MAX_PACKET_USIZE + 200));
+//         } else if rnd < 0.5 {
+//             w.push(TestWriterMode::Write(0));
+//         } else if rnd < 0.6 {
+//             w.push(TestWriterMode::Write(3));
+//         } else {
+//             let rnd2 = f32::rand(&mut rand::thread_rng());
+//             w.push(TestWriterMode::Write((rnd2 * (MAX_PACKET_USIZE + 42) as f32) as usize));
+//         }
+//     }
+//
+//     let mut b = Boxer::new(w, key.clone(), nonce.clone());
+//
+//     let mut r = OwningTestReader::new();
+//     let mut u = Unboxer::new(r, key.clone(), nonce.clone());
+//
+//     let mut out = [0u8; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE + 200];
+//     let mut total_read = 0usize;
+//     loop {
+//         // encrypt data
+//         if b.get_ref().remaining_writes() > 0 {
+//             for i in 0..writes {
+//                 let rnd = f32::rand(&mut rand::thread_rng());
+//                 b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]);
+//             }
+//             cypher_text.extend(b.get_ref().inner());
+//         }
+//
+//         // decrypt data
+//         // determine reader mode
+//         let mut cypher_data = Vec::new();
+//         let rnd2 = f32::rand(&mut rand::thread_rng());
+//         if rnd2 < 0.1 {
+//             u.get_mut()
+//                 .push(OwningTestReaderMode::Error(Error::new(ErrorKind::Interrupted,
+//                                                              "simulating Interrupted error")));
+//         } else if rnd2 < 0.2 {
+//             u.get_mut()
+//                 .push(OwningTestReaderMode::Error(Error::new(ErrorKind::WouldBlock,
+//                                                              "simulating WouldBlock error")));
+//         } else if rnd2 < 0.3 {
+//             cypher_data.extend_from_slice(&cypher_text[total_read..
+//                                            cmp::min(total_read + MAX_PACKET_USIZE,
+//                                                     cypher_text.len())]);
+//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
+//             total_read += MAX_PACKET_USIZE;
+//         } else if rnd2 < 0.4 {
+//             cypher_data.extend_from_slice(&cypher_text[total_read..
+//                                            cmp::min(total_read + MAX_PACKET_USIZE +
+//                                                     200,
+//                                                     cypher_text.len())]);
+//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
+//             total_read += MAX_PACKET_USIZE + 200;
+//         } else if rnd2 < 0.5 {
+//             cypher_data.extend_from_slice(&cypher_text[total_read..total_read]);
+//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
+//         } else if rnd2 < 0.6 {
+//             cypher_data.extend_from_slice(&cypher_text[total_read..
+//                                            cmp::min(total_read + 3,
+//                                                     cypher_text.len())]);
+//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
+//             total_read += 3;
+//         } else {
+//             let rnd3 = f32::rand(&mut rand::thread_rng());
+//             cypher_data.extend_from_slice(&cypher_text[total_read..
+//                                            cmp::min(total_read +
+//                                                     (rnd3 * (MAX_PACKET_USIZE + 42) as f32) as
+//                                                     usize,
+//                                                     cypher_text.len())]);
+//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
+//             total_read += (rnd3 * (MAX_PACKET_USIZE + 42) as f32) as usize;
+//         }
+//
+//         // actually read
+//         let mut rnd4 = f32::rand(&mut rand::thread_rng());
+//         let rnd5 = f32::rand(&mut rand::thread_rng());
+//         if rnd5 > rnd4 {
+//             // bias reader to read faster then the writer writes
+//             rnd4 = rnd5;
+//         }
+//         match u.read(&mut out[..(rnd4 * (CYPHER_HEADER_SIZE + MAX_PACKET_USIZE + 200) as f32) as
+//                             usize]) {
+//             Ok(read) => {
+//                 decrypted.extend(&out[..read]);
+//             }
+//             Err(_) => {}
+//         }
+//
+//         // everything is decrypted
+//         if b.get_ref().remaining_writes() == 0 && cypher_text.len() == 0 {
+//             break;
+//         }
+//     }
+//
+//     println!("checking {:?} bytes", decrypted.len());
+//     for byte in decrypted {
+//         assert_eq!(byte, 42u8);
+//     }
+// }
