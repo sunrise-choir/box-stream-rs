@@ -398,7 +398,7 @@ fn test_reader_error() {
 }
 
 // read slower than the underlying reader => encrypted data is buffered
-// #[test]
+#[test]
 fn test_reader_slow_consumer() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -760,7 +760,7 @@ fn test_writer_random() {
 }
 
 // read data with a randomly behaving inner reader, and ensure it reads correctly
-#[test]
+// #[test]
 fn test_reader_random() {
     // number of writes to test
     let writes = 1000;

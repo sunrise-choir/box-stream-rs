@@ -70,10 +70,18 @@ struct ReaderBuffer {
 enum ReaderBufferMode {
     WaitingForHeader,
     WaitingForPacket,
-    ReadyToDecryptPacket,
     HoldsPlaintextPacket { offset: u16, packet_len: u16 },
 }
 use self::ReaderBufferMode::*;
+
+impl ReaderBufferMode {
+    fn is_waiting(&self) -> bool {
+        match *self {
+            HoldsPlaintextPacket { offset, packet_len } => false,
+            _ => true,
+        }
+    }
+}
 
 // TODO malicious peer could send headers with a length greater than MAX_PACKET_SIZE
 // how should that be handled?
@@ -95,23 +103,6 @@ impl ReaderBuffer {
         unsafe {
             decrypt_header_inplace(&mut *(self.buffer.as_mut_ptr().offset(header_index as isize) as
                                           *mut [u8; CYPHER_HEADER_SIZE]),
-                                   &key.0,
-                                   &mut nonce.0)
-        }
-    }
-
-    fn decrypt_packet_at(&mut self,
-                         key: &secretbox::Key,
-                         nonce: &mut secretbox::Nonce,
-                         header_index: u16)
-                         -> bool {
-        let plain_header = self.plain_header_at(header_index);
-        unsafe {
-            decrypt_packet_inplace(self.buffer
-                                       .as_mut_ptr()
-                                       .offset(header_index as isize +
-                                               CYPHER_HEADER_SIZE as isize),
-                                   &plain_header,
                                    &key.0,
                                    &mut nonce.0)
         }
@@ -143,11 +134,79 @@ impl ReaderBuffer {
         self.last -= offset;
     }
 
+    fn decrypt_packet_at(&mut self,
+                         key: &secretbox::Key,
+                         nonce: &mut secretbox::Nonce,
+                         header_index: u16) {
+        let plain_header = self.plain_header_at(header_index);
+        let packet_len = plain_header.get_packet_len();
+
+        debug_assert!(packet_len <= MAX_PACKET_SIZE); // TODO correct handling of this
+
+        unsafe {
+            assert!(decrypt_packet_inplace(self.buffer
+                                               .as_mut_ptr()
+                                               .offset(header_index as isize +
+                                                       CYPHER_HEADER_SIZE as isize),
+                                           &plain_header,
+                                           &key.0,
+                                           &mut nonce.0)); // TODO handle this
+        }
+
+        self.mode = HoldsPlaintextPacket {
+            offset: CYPHER_HEADER_SIZE as u16,
+            packet_len,
+        };
+    }
+
     fn read_to(&mut self,
                out: &mut [u8],
                key: &secretbox::Key,
                nonce: &mut secretbox::Nonce)
                -> usize {
+
+        // while let HoldsPlaintextPacket { offset, packet_len } = self.mode {
+        //     let max_readable = cmp::min(out.len() as u16, packet_len);
+        //
+        //     unsafe {
+        //         ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(offset as isize),
+        //                                  out.as_mut_ptr(),
+        //                                  max_readable as usize);
+        //     }
+        //     let offset = offset + max_readable;
+        //
+        //     // done reading, now update mode
+        //
+        //     if max_readable < packet_len {
+        //         // we have more plaintext, but the `out` buffer is full
+        //         debug_assert!(self.mode == HoldsPlaintextPacket { offset, packet_len });
+        //         return max_readable as usize;
+        //     } else {
+        //         // we don't have more plaintext to fill the outbuffer
+        //
+        //         if self.last < offset + CYPHER_HEADER_SIZE as u16 {
+        //             self.mode = WaitingForHeader;
+        //         } else {
+        //             // decrypt header to see whether we have a full packet buffered
+        //             // TODO check return value of decrypt_header_at and handle failure
+        //             assert!(self.decrypt_header_at(key, nonce, offset));
+        //
+        //             let cypher_packet_len = self.cypher_packet_len_at(offset);
+        //             if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
+        //                 self.mode = WaitingForPacket;
+        //             } else {
+        //                 self.decrypt_packet_at(key, nonce, offset);
+        //             }
+        //         }
+        //
+        //         self.shift_left(offset);
+        //
+        //         return max_readable as usize;
+        //     }
+        // }
+        //
+        // unreachable!();
+
         match self.mode {
             HoldsPlaintextPacket { offset, packet_len } => {
                 let max_readable = cmp::min(out.len() as u16, packet_len);
@@ -163,6 +222,10 @@ impl ReaderBuffer {
 
                 if max_readable < packet_len {
                     // we have more plaintext, but the `out` buffer is full
+                    println!("offset: {:?}", offset);
+                    println!("packet_len: {:?}", packet_len);
+                    println!("self.mode: {:?}", self.mode);
+                    self.mode = HoldsPlaintextPacket { offset, packet_len };
                     debug_assert!(self.mode == HoldsPlaintextPacket { offset, packet_len });
                     return max_readable as usize;
                 } else {
@@ -179,7 +242,7 @@ impl ReaderBuffer {
                         if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
                             self.mode = WaitingForPacket;
                         } else {
-                            self.mode = ReadyToDecryptPacket;
+                            self.decrypt_packet_at(key, nonce, offset);
                         }
                     }
 
@@ -218,24 +281,10 @@ impl ReaderBuffer {
                 self.mode = WaitingForPacket;
                 return Ok(());
             } else {
-                self.mode = ReadyToDecryptPacket;
+                self.decrypt_packet_at(key, nonce, 0);
                 return Ok(());
             }
         }
-    }
-
-    fn decrypt_packet(&mut self, key: &secretbox::Key, nonce: &mut secretbox::Nonce) {
-        debug_assert!(self.mode == ReadyToDecryptPacket);
-
-        let packet_len = self.cypher_packet_len_at(0);
-        assert!(packet_len <= MAX_PACKET_SIZE); // TODO correct handling of this
-
-        assert!(self.decrypt_packet_at(key, nonce, 0)); // TODO correct handling of this
-
-        self.mode = HoldsPlaintextPacket {
-            offset: CYPHER_HEADER_SIZE as u16,
-            packet_len,
-        };
     }
 }
 
@@ -246,25 +295,20 @@ fn do_read<R: Read>(out: &mut [u8],
                     nonce: &mut secretbox::Nonce,
                     buffer: &mut ReaderBuffer)
                     -> io::Result<usize> {
-    let ret;
 
-    match buffer.mode {
-        WaitingForHeader => {
-            buffer.fill(reader, key, nonce)?;
-            ret = 0;
-        }
-        WaitingForPacket => {
-            buffer.fill(reader, key, nonce)?;
-            ret = 0;
-        }
-        ReadyToDecryptPacket => {
-            buffer.decrypt_packet(key, nonce);
-            ret = 0;
-        }
-        HoldsPlaintextPacket {
-            offset: _,
-            packet_len: _,
-        } => ret = buffer.read_to(out, key, nonce),
+    let mut total_read = 0;
+    if buffer.mode.is_waiting() {
+        buffer.fill(reader, key, nonce)?;
     }
-    return Ok(ret);
+
+    while let HoldsPlaintextPacket { offset, packet_len } = buffer.mode {
+        println!("total_read: {:?}", total_read);
+        println!("out.len(): {:?}", out.len());
+        if total_read >= out.len() {
+            break;
+        }
+        total_read += buffer.read_to(&mut out[total_read..], key, nonce);
+    }
+
+    return Ok(total_read);
 }
