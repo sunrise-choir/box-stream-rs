@@ -368,24 +368,11 @@ impl<'a> Read for TestReader<'a> {
                             buf[i] = *byte;
                             count += 1;
                         }
-                        println!("TestReader: Read {:?}", count);
                         return Ok(cmp::min(data.len(), buf.len()));
                     }
                 }
             }
         }
-        // match self.mode_queue.pop_back().unwrap() {
-        //     TestReaderMode::Error(e) => return Err(e),
-        //     TestReaderMode::Read(data) => {
-        //         let mut count = 0;
-        //         for (i, byte) in data.iter().take(buf.len()).enumerate() {
-        //             buf[i] = *byte;
-        //             count += 1;
-        //         }
-        //         println!("TestReader: Read {:?}", count);
-        //         return Ok(cmp::min(data.len(), buf.len()));
-        //     }
-        // }
     }
 }
 
@@ -825,8 +812,6 @@ fn test_reader_random() {
     }
     b.flush();
     cypher_text.extend(b.get_ref().inner());
-    println!("cypher_text: {:?}", cypher_text);
-    println!("cypher_text.len(): {:?}", cypher_text.len());
 
     // decrypt everything
     let mut r = RandomReader::new(cypher_text);
@@ -839,12 +824,10 @@ fn test_reader_random() {
             Err(_) => {}
             Ok(amount) => {
                 total_read += amount;
-                println!("read {:?}", amount);
                 assert_eq!(decrypted[..amount], plain_data[..amount]);
             }
         }
     }
-    println!("total_read: {:?}", total_read);
 }
 
 // sequentially reads from an owned buffer, reads random amounts (and sometimes errors)
@@ -922,168 +905,3 @@ impl Read for RandomReader {
         }
     }
 }
-
-// // TODO remove this
-// #[test]
-// fn test_reader_fast_tmp() {
-//     let data = [
-//         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
-//         144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
-//         193, // end header 1, index: 34
-//         231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
-//         227, 230, 249, 230, 176, 170, 49, 34, 220, 29, 156, 118, 225, 243, 7, 3, 163,
-//         197, 125, 225, 240, 111, 195, 126, 240, 148, 201, 237, 158, 158, 134, 224, 246,
-//         137, // end header 2, index: 76
-//         22u8, 134, 141, 191, 19, 113, 211, 114 // end data 2, index: 84
-//     ];
-//
-//     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
-//                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
-//                               7, 34, 157, 174, 24]);
-//     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
-//                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
-//
-//     let mut r = TestReader::new();
-//     r.push(TestReaderMode::Read(&data));
-//
-//     let mut u = Unboxer::new(r, key, nonce);
-//     let mut buf = [0u8; 32];
-//
-//     assert_eq!(u.read(&mut buf).unwrap(), 0);
-//     assert_eq!(u.read(&mut buf).unwrap(), 0);
-//     assert_eq!(u.read(&mut buf).unwrap(), 8);
-//     assert_eq!(buf[..8], [0u8, 1, 2, 3, 4, 5, 6, 7]);
-//     assert_eq!(u.read(&mut buf).unwrap(), 0);
-//     assert_eq!(u.read(&mut buf).unwrap(), 8);
-//     assert_eq!(buf[..8], [7u8, 6, 5, 4, 3, 2, 1, 0]);
-// }
-
-// // compose boxer and unboxer to get the identity stream TODO delete this
-// // #[test]
-// fn test_composition() {
-//     // number of writes to test
-//     let writes = 1; // TODO increase this
-//
-//     let mut cypher_text: Vec<u8> = Vec::new();
-//     let mut decrypted: Vec<u8> = Vec::new();
-//
-//     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
-//                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
-//                               7, 34, 157, 174, 24]);
-//     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
-//                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
-//
-//     let plain_data = [42u8; MAX_PACKET_USIZE + 500];
-//
-//     let mut w = TestWriter::new();
-//     for i in 0..writes {
-//         let rnd = f32::rand(&mut rand::thread_rng());
-//
-//         if rnd < 0.1 {
-//             w.push(TestWriterMode::Error(Error::new(ErrorKind::Interrupted,
-//                                                     "simulating Interrupted error")));
-//         } else if rnd < 0.2 {
-//             w.push(TestWriterMode::Error(Error::new(ErrorKind::WouldBlock,
-//                                                     "simulating WouldBlock error")));
-//         } else if rnd < 0.3 {
-//             w.push(TestWriterMode::Write(MAX_PACKET_USIZE));
-//         } else if rnd < 0.4 {
-//             w.push(TestWriterMode::Write(MAX_PACKET_USIZE + 200));
-//         } else if rnd < 0.5 {
-//             w.push(TestWriterMode::Write(0));
-//         } else if rnd < 0.6 {
-//             w.push(TestWriterMode::Write(3));
-//         } else {
-//             let rnd2 = f32::rand(&mut rand::thread_rng());
-//             w.push(TestWriterMode::Write((rnd2 * (MAX_PACKET_USIZE + 42) as f32) as usize));
-//         }
-//     }
-//
-//     let mut b = Boxer::new(w, key.clone(), nonce.clone());
-//
-//     let mut r = OwningTestReader::new();
-//     let mut u = Unboxer::new(r, key.clone(), nonce.clone());
-//
-//     let mut out = [0u8; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE + 200];
-//     let mut total_read = 0usize;
-//     loop {
-//         // encrypt data
-//         if b.get_ref().remaining_writes() > 0 {
-//             for i in 0..writes {
-//                 let rnd = f32::rand(&mut rand::thread_rng());
-//                 b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]);
-//             }
-//             cypher_text.extend(b.get_ref().inner());
-//         }
-//
-//         // decrypt data
-//         // determine reader mode
-//         let mut cypher_data = Vec::new();
-//         let rnd2 = f32::rand(&mut rand::thread_rng());
-//         if rnd2 < 0.1 {
-//             u.get_mut()
-//                 .push(OwningTestReaderMode::Error(Error::new(ErrorKind::Interrupted,
-//                                                              "simulating Interrupted error")));
-//         } else if rnd2 < 0.2 {
-//             u.get_mut()
-//                 .push(OwningTestReaderMode::Error(Error::new(ErrorKind::WouldBlock,
-//                                                              "simulating WouldBlock error")));
-//         } else if rnd2 < 0.3 {
-//             cypher_data.extend_from_slice(&cypher_text[total_read..
-//                                            cmp::min(total_read + MAX_PACKET_USIZE,
-//                                                     cypher_text.len())]);
-//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
-//             total_read += MAX_PACKET_USIZE;
-//         } else if rnd2 < 0.4 {
-//             cypher_data.extend_from_slice(&cypher_text[total_read..
-//                                            cmp::min(total_read + MAX_PACKET_USIZE +
-//                                                     200,
-//                                                     cypher_text.len())]);
-//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
-//             total_read += MAX_PACKET_USIZE + 200;
-//         } else if rnd2 < 0.5 {
-//             cypher_data.extend_from_slice(&cypher_text[total_read..total_read]);
-//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
-//         } else if rnd2 < 0.6 {
-//             cypher_data.extend_from_slice(&cypher_text[total_read..
-//                                            cmp::min(total_read + 3,
-//                                                     cypher_text.len())]);
-//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
-//             total_read += 3;
-//         } else {
-//             let rnd3 = f32::rand(&mut rand::thread_rng());
-//             cypher_data.extend_from_slice(&cypher_text[total_read..
-//                                            cmp::min(total_read +
-//                                                     (rnd3 * (MAX_PACKET_USIZE + 42) as f32) as
-//                                                     usize,
-//                                                     cypher_text.len())]);
-//             u.get_mut().push(OwningTestReaderMode::Read(cypher_data));
-//             total_read += (rnd3 * (MAX_PACKET_USIZE + 42) as f32) as usize;
-//         }
-//
-//         // actually read
-//         let mut rnd4 = f32::rand(&mut rand::thread_rng());
-//         let rnd5 = f32::rand(&mut rand::thread_rng());
-//         if rnd5 > rnd4 {
-//             // bias reader to read faster then the writer writes
-//             rnd4 = rnd5;
-//         }
-//         match u.read(&mut out[..(rnd4 * (CYPHER_HEADER_SIZE + MAX_PACKET_USIZE + 200) as f32) as
-//                             usize]) {
-//             Ok(read) => {
-//                 decrypted.extend(&out[..read]);
-//             }
-//             Err(_) => {}
-//         }
-//
-//         // everything is decrypted
-//         if b.get_ref().remaining_writes() == 0 && cypher_text.len() == 0 {
-//             break;
-//         }
-//     }
-//
-//     println!("checking {:?} bytes", decrypted.len());
-//     for byte in decrypted {
-//         assert_eq!(byte, 42u8);
-//     }
-// }
