@@ -2,7 +2,8 @@ extern crate rand;
 
 use super::*;
 
-use std::io::Write; // , Read
+use std::cmp;
+use std::io::{Write, Read};
 use std::io::{Error, ErrorKind};
 use std::collections::VecDeque;
 
@@ -11,7 +12,6 @@ use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader,
 use sodiumoxide::crypto::secretbox;
 
 use test::rand::Rand;
-use test::rand::distributions::{IndependentSample, Range};
 
 struct TestWriter {
     data: Vec<u8>,
@@ -76,7 +76,7 @@ impl Write for TestWriter {
 }
 
 // underlying writer errors => Boxer propagates the error
-// #[test]
+#[test]
 fn test_writer_error() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -95,7 +95,7 @@ fn test_writer_error() {
 }
 
 // write more than underlying writer can accept but less than MAX_PACKET_USIZE => writer buffers encrypted data and on subsequent writes ignores its input and writes from the buffer instead (returning 0)
-// #[test]
+#[test]
 fn test_writer_slow() {
     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
@@ -170,7 +170,7 @@ fn test_writer_slow() {
 }
 
 // error propagation does not interfer with buffering
-// #[test]
+#[test]
 fn test_writer_error_while_buffering() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -195,7 +195,7 @@ fn test_writer_error_while_buffering() {
 }
 
 // write more than MAX_PACKET_USIZE => only buffer up to MAX_PACKET_USIZE, even if underlying writer could write more then MAX_PACKET_USIZE
-// #[test]
+#[test]
 fn test_writer_larger_then_buffer() {
     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
@@ -228,7 +228,7 @@ fn test_writer_larger_then_buffer() {
 }
 
 // write more than MAX_PACKET_USIZE => only buffer up to MAX_PACKET_USIZE, even if underlying writer could write more then MAX_PACKET_USIZE
-// #[test]
+#[test]
 fn test_writer_larger_then_buffer_fancy() {
     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
@@ -269,7 +269,7 @@ fn test_writer_larger_then_buffer_fancy() {
                expected_cyphertext[..]);
 }
 
-// #[test]
+#[test]
 fn test_writer_flush() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -294,7 +294,7 @@ fn test_writer_flush() {
     assert_eq!(b.get_ref().get_flush_count(), 1);
 }
 
-// #[test]
+#[test]
 fn test_writer_shutdown() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -345,14 +345,6 @@ impl<'a> TestReader<'a> {
     fn push(&mut self, mode: TestReaderMode<'a>) {
         self.mode_queue.push_front(mode)
     }
-    //
-    // fn inner(&self) -> &Vec<u8> {
-    //     &self.data
-    // }
-    //
-    // fn inner_mut(&mut self) -> &mut Vec<u8> {
-    //     &mut self.data
-    // }
 }
 
 impl<'a> Read for TestReader<'a> {
@@ -376,8 +368,8 @@ impl<'a> Read for TestReader<'a> {
     }
 }
 
-// underlying writer errors => Boxer propagates the error
-// #[test]
+// underlying writer errors => Unoxer propagates the error
+#[test]
 fn test_reader_error() {
     let key = sodiumoxide::crypto::secretbox::gen_key();
     let nonce = sodiumoxide::crypto::secretbox::gen_nonce();
@@ -435,7 +427,7 @@ fn test_reader_slow_consumer() {
 }
 
 // read slower than the underlying reader => encrypted data is buffered
-// #[test]
+#[test]
 fn test_reader_slow_inner() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -487,7 +479,7 @@ fn test_reader_slow_inner() {
 }
 
 // read more than one packet in one go
-// #[test]
+#[test]
 fn test_reader_fast() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -518,7 +510,7 @@ fn test_reader_fast() {
 }
 
 // read more than one packet, landing in the middle of a header
-// #[test]
+#[test]
 fn test_reader_fast2() {
     let data = [
         181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
@@ -555,7 +547,7 @@ fn test_reader_fast2() {
 }
 
 // read more than MAX_PACKET_SIZE -> only read MAX_PACKET_SIZE
-// #[test]
+#[test]
 fn test_reader_max_size() {
     let plain_data = [0u8; MAX_PACKET_USIZE + 42];
 
@@ -585,7 +577,7 @@ fn test_reader_max_size() {
 }
 
 // unboxer reads two packets, second one does not fit into buffer, then call read with large out buffer
-// #[test]
+#[test]
 fn test_reader_partially_buffered_packet() {
     let plain_data = [0u8; 3000];
 
@@ -615,67 +607,8 @@ fn test_reader_partially_buffered_packet() {
     assert_eq!(buf[..3000], plain_data[..3000]);
 }
 
-// ## Unboxer TODO write these tests
-// - handle end of stream
-// - handling malicious peers (packets > MAX_PACKET_SIZE, packets with too long packet length)
-
-// How Boxer and Unboxer work
-//
-// ## Boxer
-// - encrypt given data (at max MAX_PACKET_USIZE bytes) and put the encrypted data into a buffer
-// - then ignore all further input until the buffer has been fully written to the underlying writer
-//
-// ## Unboxer
-// - read the encrypted data into a buffer (at most CYPHER_HEADER_SIZE + MAX_PACKET_USIZE)
-// - when the buffer contains a full header, decrypt the header in-place
-// - then, read further data (if needed) until a full encrypted message is in the buffer
-// - decrypt the message in-place and return it on reads
-// - when the buffered message has been fully read, pull more data from the underlying reader
-
-// struct OwningTestReader {
-//     mode_queue: VecDeque<OwningTestReaderMode>,
-// }
-//
-// // Determines how a test reader should react to a read call
-// enum OwningTestReaderMode {
-//     Error(io::Error),
-//     Read(Vec<u8>),
-// }
-//
-// impl OwningTestReader {
-//     fn new() -> OwningTestReader {
-//         OwningTestReader { mode_queue: VecDeque::new() }
-//     }
-//
-//     fn push(&mut self, mode: OwningTestReaderMode) {
-//         self.mode_queue.push_front(mode)
-//     }
-// }
-//
-// impl Read for OwningTestReader {
-//     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-//         match self.mode_queue.pop_back() {
-//             None => Err(Error::new(ErrorKind::UnexpectedEof, "reached end of OwningTestReader")),
-//             Some(mode) => {
-//                 match mode {
-//                     OwningTestReaderMode::Error(e) => return Err(e),
-//                     OwningTestReaderMode::Read(data) => {
-//                         let mut count = 0;
-//                         for (i, byte) in data.iter().take(buf.len()).enumerate() {
-//                             buf[i] = *byte;
-//                             count += 1;
-//                         }
-//                         println!("OwnedTestReader: Read {:?}", count);
-//                         return Ok(cmp::min(data.len(), buf.len()));
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
 // write data with a randomly behaving inner writer, and ensure it writes correctly
-// #[test]
+#[test]
 fn test_writer_random() {
     // number of writes to test
     let writes = 1000;
@@ -760,7 +693,7 @@ fn test_writer_random() {
 }
 
 // read data with a randomly behaving inner reader, and ensure it reads correctly
-// #[test]
+#[test]
 fn test_reader_random() {
     // number of writes to test
     let writes = 1000;
@@ -905,3 +838,7 @@ impl Read for RandomReader {
         }
     }
 }
+
+// ## Unboxer TODO write these tests
+// - handle end of stream
+// - handling malicious peers (packets > MAX_PACKET_SIZE, packets with too long packet length)

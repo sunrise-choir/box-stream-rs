@@ -2,8 +2,7 @@ extern crate libc;
 extern crate sodiumoxide;
 
 use std::io;
-use std::io::{Write, Read};
-use std::cmp;
+use std::io::Write;
 
 pub mod crypto;
 pub mod boxer;
@@ -12,8 +11,7 @@ pub mod unboxer;
 pub use boxer::*;
 pub use unboxer::*;
 
-// TODO uncomment this for releases
-// #[cfg(test)]
+#[cfg(test)]
 mod test;
 
 /// Common interface for writable streams which encrypt all bytes using box-stream.

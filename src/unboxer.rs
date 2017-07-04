@@ -70,14 +70,20 @@ struct ReaderBuffer {
 enum ReaderBufferMode {
     WaitingForHeader,
     WaitingForPacket,
-    HoldsPlaintextPacket { offset: u16, packet_len: u16 },
+    HoldsPlaintextPacket {
+        offset: u16, // where in the buffer to read from next
+        header_index: u16, // points to the plain header of the currently read package
+    },
 }
 use self::ReaderBufferMode::*;
 
 impl ReaderBufferMode {
     fn is_waiting(&self) -> bool {
         match *self {
-            HoldsPlaintextPacket { offset, packet_len } => false,
+            HoldsPlaintextPacket {
+                offset,
+                header_index,
+            } => false,
             _ => true,
         }
     }
@@ -155,7 +161,7 @@ impl ReaderBuffer {
 
         self.mode = HoldsPlaintextPacket {
             offset: CYPHER_HEADER_SIZE as u16,
-            packet_len,
+            header_index,
         };
     }
 
@@ -164,52 +170,24 @@ impl ReaderBuffer {
                key: &secretbox::Key,
                nonce: &mut secretbox::Nonce)
                -> usize {
-
-        // while let HoldsPlaintextPacket { offset, packet_len } = self.mode {
-        //     let max_readable = cmp::min(out.len() as u16, packet_len);
-        //
-        //     unsafe {
-        //         ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(offset as isize),
-        //                                  out.as_mut_ptr(),
-        //                                  max_readable as usize);
-        //     }
-        //     let offset = offset + max_readable;
-        //
-        //     // done reading, now update mode
-        //
-        //     if max_readable < packet_len {
-        //         // we have more plaintext, but the `out` buffer is full
-        //         debug_assert!(self.mode == HoldsPlaintextPacket { offset, packet_len });
-        //         return max_readable as usize;
-        //     } else {
-        //         // we don't have more plaintext to fill the outbuffer
-        //
-        //         if self.last < offset + CYPHER_HEADER_SIZE as u16 {
-        //             self.mode = WaitingForHeader;
-        //         } else {
-        //             // decrypt header to see whether we have a full packet buffered
-        //             // TODO check return value of decrypt_header_at and handle failure
-        //             assert!(self.decrypt_header_at(key, nonce, offset));
-        //
-        //             let cypher_packet_len = self.cypher_packet_len_at(offset);
-        //             if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
-        //                 self.mode = WaitingForPacket;
-        //             } else {
-        //                 self.decrypt_packet_at(key, nonce, offset);
-        //             }
-        //         }
-        //
-        //         self.shift_left(offset);
-        //
-        //         return max_readable as usize;
-        //     }
-        // }
-        //
-        // unreachable!();
-
+        println!("  {}", "entered read_to");
         match self.mode {
-            HoldsPlaintextPacket { offset, packet_len } => {
-                let max_readable = cmp::min(out.len() as u16, packet_len);
+            HoldsPlaintextPacket {
+                offset,
+                header_index,
+            } => {
+                println!("  offset: {:?}", offset);
+                println!("  header_index: {:?}", header_index);
+                let packet_len = self.cypher_packet_len_at(header_index);
+                println!("  packet_len: {:?}", packet_len);
+                let remaining_plaintext = header_index + CYPHER_HEADER_SIZE as u16 + packet_len -
+                                          offset;
+                println!("  remaining_plaintext: {:?}", remaining_plaintext);
+
+                let max_readable = cmp::min(cmp::min(out.len() as u16, packet_len),
+                                            remaining_plaintext);
+                println!("  max_readable: {:?}", max_readable);
+
 
                 unsafe {
                     ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(offset as isize),
@@ -220,13 +198,12 @@ impl ReaderBuffer {
 
                 // done reading, now update mode
 
-                if max_readable < packet_len {
+                if (remaining_plaintext != 0) && (out.len() as u16) < packet_len {
                     // we have more plaintext, but the `out` buffer is full
-                    println!("offset: {:?}", offset);
-                    println!("packet_len: {:?}", packet_len);
-                    println!("self.mode: {:?}", self.mode);
-                    self.mode = HoldsPlaintextPacket { offset, packet_len };
-                    debug_assert!(self.mode == HoldsPlaintextPacket { offset, packet_len });
+                    self.mode = HoldsPlaintextPacket {
+                        offset,
+                        header_index,
+                    };
                     return max_readable as usize;
                 } else {
                     // we don't have more plaintext to fill the outbuffer
@@ -247,6 +224,18 @@ impl ReaderBuffer {
                     }
 
                     self.shift_left(offset);
+                    match self.mode {
+                        HoldsPlaintextPacket {
+                            offset: o,
+                            header_index: h,
+                        } => {
+                            self.mode = HoldsPlaintextPacket {
+                                offset: o,
+                                header_index: 0,
+                            }
+                        }
+                        _ => {}
+                    }
 
                     return max_readable as usize;
                 }
@@ -301,14 +290,20 @@ fn do_read<R: Read>(out: &mut [u8],
         buffer.fill(reader, key, nonce)?;
     }
 
-    while let HoldsPlaintextPacket { offset, packet_len } = buffer.mode {
+    while let HoldsPlaintextPacket {
+                  offset,
+                  header_index,
+              } = buffer.mode {
         println!("total_read: {:?}", total_read);
         println!("out.len(): {:?}", out.len());
         if total_read >= out.len() {
             break;
         }
         total_read += buffer.read_to(&mut out[total_read..], key, nonce);
+        println!("{}", "  returned from read_to");
     }
+
+    println!("return from do_read: {:?}\n", total_read);
 
     return Ok(total_read);
 }
