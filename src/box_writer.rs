@@ -1,4 +1,4 @@
-// Implementation of Boxer, a wrapper for writers that encrypts all writes and handles buffering, flushing etc.
+// Implementation of BoxWriter, a wrapper for writers that encrypts all writes and handles buffering, flushing etc.
 
 use std::io::Write;
 use std::{io, cmp, mem, u16};
@@ -6,20 +6,18 @@ use sodiumoxide::crypto::secretbox;
 
 use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, encrypt_packet, final_header};
 
-use super::BoxWriter;
-
 /// Wraps a writer, encrypting all writes.
-pub struct Boxer<W: Write> {
+pub struct BoxWriter<W: Write> {
     inner: W,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
     buffer: WriterBuffer,
 }
 
-impl<W: Write> Boxer<W> {
-    /// Creates a new Boxer, using the supplied key and nonce.
-    pub fn new(inner: W, key: secretbox::Key, nonce: secretbox::Nonce) -> Boxer<W> {
-        Boxer {
+impl<W: Write> BoxWriter<W> {
+    /// Creates a new BoxWriter, using the supplied key and nonce.
+    pub fn new(inner: W, key: secretbox::Key, nonce: secretbox::Nonce) -> BoxWriter<W> {
+        BoxWriter {
             inner,
             key,
             nonce,
@@ -39,13 +37,24 @@ impl<W: Write> Boxer<W> {
         &mut self.inner
     }
 
-    /// Unwraps this `Boxer`, returning the underlying writer.
+    /// Unwraps this `BoxWriter`, returning the underlying writer.
     pub fn into_inner(self) -> W {
         self.inner
     }
+
+    /// Tries to write a final header, indicating the end of the connection.
+    /// This will flush all internally buffered data before writing the header.
+    /// After this has returned `Ok(())`, no further methods of the `BoxWriter`
+    /// may be called.
+    pub fn shutdown(&mut self) -> io::Result<()> {
+        do_shutdown(&mut self.inner,
+                    &self.key,
+                    &mut self.nonce,
+                    &mut self.buffer)
+    }
 }
 
-impl<W: Write> Write for Boxer<W> {
+impl<W: Write> Write for BoxWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         do_write(buf,
                  &mut self.inner,
@@ -56,15 +65,6 @@ impl<W: Write> Write for Boxer<W> {
 
     fn flush(&mut self) -> io::Result<()> {
         do_flush(&mut self.inner, &mut self.buffer)
-    }
-}
-
-impl<W: Write> BoxWriter for Boxer<W> {
-    fn shutdown(&mut self) -> io::Result<()> {
-        do_shutdown(&mut self.inner,
-                    &self.key,
-                    &mut self.nonce,
-                    &mut self.buffer)
     }
 }
 

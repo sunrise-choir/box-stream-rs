@@ -1,4 +1,4 @@
-// Implementation of Unboxer, a wrapper for readers that dencrypts all writes and handles buffering.
+// Implementation of BoxReader, a wrapper for readers that dencrypts all writes and handles buffering.
 
 use std::io::Read;
 use std::{io, cmp, mem, u16, ptr};
@@ -8,16 +8,16 @@ use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader,
              decrypt_header_inplace, decrypt_packet_inplace};
 
 /// Wraps a reader, decrypting all reads.
-pub struct Unboxer<R: Read> {
+pub struct BoxReader<R: Read> {
     inner: R,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
     buffer: ReaderBuffer,
 }
 
-impl<R: Read> Unboxer<R> {
-    pub fn new(inner: R, key: secretbox::Key, nonce: secretbox::Nonce) -> Unboxer<R> {
-        Unboxer {
+impl<R: Read> BoxReader<R> {
+    pub fn new(inner: R, key: secretbox::Key, nonce: secretbox::Nonce) -> BoxReader<R> {
+        BoxReader {
             inner,
             key,
             nonce,
@@ -37,13 +37,13 @@ impl<R: Read> Unboxer<R> {
         &mut self.inner
     }
 
-    /// Unwraps this `Unboxer`, returning the underlying reader.
+    /// Unwraps this `BoxReader`, returning the underlying reader.
     pub fn into_inner(self) -> R {
         self.inner
     }
 }
 
-impl<R: Read> Read for Unboxer<R> {
+impl<R: Read> Read for BoxReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         do_read(buf,
                 &mut self.inner,
@@ -90,7 +90,7 @@ impl ReaderBufferMode {
 impl ReaderBuffer {
     fn new() -> ReaderBuffer {
         ReaderBuffer {
-            buffer: [0; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE], // TODO can this be left uninitialized?
+            buffer: [0; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE],
             last: 0,
             offset: 0,
             header_index: 0,
@@ -136,6 +136,8 @@ impl ReaderBuffer {
                       (self.last - offset) as usize);
         }
         self.last -= offset;
+        self.offset = CYPHER_HEADER_SIZE as u16;
+        self.header_index = 0;
     }
 
     fn decrypt_packet_at(&mut self,
@@ -195,7 +197,6 @@ impl ReaderBuffer {
         // if (remaining_plaintext != 0) && (out.len() as u16) < packet_len {
         if (out.len() as u16) < remaining_plaintext {
             // we have more plaintext, but the `out` buffer is full
-            self.mode = Readable; // TODO is this necessary?
             self.offset = offset;
             println!("{}", "  << leaving read_to with more plaintext available");
             return max_readable as usize;
@@ -222,18 +223,9 @@ impl ReaderBuffer {
 
             self.shift_left(offset);
             println!("{}", "      shifted left");
-            if self.mode == Readable {
-                // TODO is the check necessary? can this be moved to shift_left?
-                self.offset = CYPHER_HEADER_SIZE as u16;
-                self.header_index = 0;
-            }
-            // self.offset = offset;
 
             return max_readable as usize;
         }
-
-
-
     }
 
     fn fill<R: Read>(&mut self,
@@ -295,3 +287,5 @@ fn do_read<R: Read>(out: &mut [u8],
 
     return Ok(total_read);
 }
+
+// TODO call crypto::is_final_header somewhere
