@@ -611,7 +611,7 @@ fn test_reader_partially_buffered_packet() {
 #[test]
 fn test_writer_random() {
     // number of writes to test
-    let writes = 1000;
+    let writes = 100000;
 
     let plain_data = [42u8; MAX_PACKET_USIZE + 500];
     let mut cypher_text: Vec<u8> = Vec::new();
@@ -696,7 +696,7 @@ fn test_writer_random() {
 #[test]
 fn test_reader_random() {
     // number of writes to test
-    let writes = 1000;
+    let writes = 100000;
 
     let plain_data = [42u8; MAX_PACKET_USIZE + 500];
     let mut cypher_text: Vec<u8> = Vec::new();
