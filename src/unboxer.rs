@@ -63,6 +63,8 @@ const READ_BUFFER_SIZE: usize = CYPHER_HEADER_SIZE + MAX_PACKET_USIZE;
 struct ReaderBuffer {
     buffer: [u8; READ_BUFFER_SIZE],
     last: u16, // the last element in the buffer that contains up-to-date data
+    offset: u16, // where in the buffer to read from next (only relevant in Readable)
+    header_index: u16, // points to the plain header of the currently read package (only relevant in Readable)
     mode: ReaderBufferMode,
 }
 
@@ -70,20 +72,14 @@ struct ReaderBuffer {
 enum ReaderBufferMode {
     WaitingForHeader,
     WaitingForPacket,
-    HoldsPlaintextPacket {
-        offset: u16, // where in the buffer to read from next
-        header_index: u16, // points to the plain header of the currently read package
-    },
+    Readable,
 }
 use self::ReaderBufferMode::*;
 
 impl ReaderBufferMode {
     fn is_waiting(&self) -> bool {
         match *self {
-            HoldsPlaintextPacket {
-                offset,
-                header_index,
-            } => false,
+            Readable => false,
             _ => true,
         }
     }
@@ -94,8 +90,10 @@ impl ReaderBufferMode {
 impl ReaderBuffer {
     fn new() -> ReaderBuffer {
         ReaderBuffer {
-            buffer: [0; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE],
+            buffer: [0; CYPHER_HEADER_SIZE + MAX_PACKET_USIZE], // TODO can this be left uninitialized?
             last: 0,
+            offset: 0,
+            header_index: 0,
             mode: WaitingForHeader,
         }
     }
@@ -158,11 +156,9 @@ impl ReaderBuffer {
                                            &key.0,
                                            &mut nonce.0)); // TODO handle this
         }
-
-        self.mode = HoldsPlaintextPacket {
-            offset: CYPHER_HEADER_SIZE as u16,
-            header_index,
-        };
+        self.offset = CYPHER_HEADER_SIZE as u16;
+        self.header_index = header_index;
+        self.mode = Readable; // TODO is this needed?
     }
 
     fn read_to(&mut self,
@@ -171,78 +167,73 @@ impl ReaderBuffer {
                nonce: &mut secretbox::Nonce)
                -> usize {
         println!("  {}", "entered read_to");
-        match self.mode {
-            HoldsPlaintextPacket {
-                offset,
-                header_index,
-            } => {
-                println!("  offset: {:?}", offset);
-                println!("  header_index: {:?}", header_index);
-                let packet_len = self.cypher_packet_len_at(header_index);
-                println!("  packet_len: {:?}", packet_len);
-                let remaining_plaintext = header_index + CYPHER_HEADER_SIZE as u16 + packet_len -
-                                          offset;
-                println!("  remaining_plaintext: {:?}", remaining_plaintext);
+        debug_assert!(self.mode == Readable);
 
-                let max_readable = cmp::min(cmp::min(out.len() as u16, packet_len),
-                                            remaining_plaintext);
-                println!("  max_readable: {:?}", max_readable);
+        println!("  offset: {:?}", self.offset);
+        println!("  header_index: {:?}", self.header_index);
+        let tmp = self.header_index; // TODO this is ugly
+        let packet_len = self.cypher_packet_len_at(tmp);
+        println!("  packet_len: {:?}", packet_len);
+        let remaining_plaintext = self.header_index + CYPHER_HEADER_SIZE as u16 + packet_len -
+                                  self.offset;
+        println!("  remaining_plaintext: {:?}", remaining_plaintext);
+
+        // let max_readable = cmp::min(cmp::min(out.len() as u16, packet_len), remaining_plaintext);
+        let max_readable = cmp::min(out.len() as u16, remaining_plaintext);
+        println!("  max_readable: {:?}", max_readable);
 
 
-                unsafe {
-                    ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(offset as isize),
-                                             out.as_mut_ptr(),
-                                             max_readable as usize);
-                }
-                let offset = offset + max_readable;
-
-                // done reading, now update mode
-
-                if (remaining_plaintext != 0) && (out.len() as u16) < packet_len {
-                    // we have more plaintext, but the `out` buffer is full
-                    self.mode = HoldsPlaintextPacket {
-                        offset,
-                        header_index,
-                    };
-                    return max_readable as usize;
-                } else {
-                    // we don't have more plaintext to fill the outbuffer
-
-                    if self.last < offset + CYPHER_HEADER_SIZE as u16 {
-                        self.mode = WaitingForHeader;
-                    } else {
-                        // decrypt header to see whether we have a full packet buffered
-                        // TODO check return value of decrypt_header_at and handle failure
-                        assert!(self.decrypt_header_at(key, nonce, offset));
-
-                        let cypher_packet_len = self.cypher_packet_len_at(offset);
-                        if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
-                            self.mode = WaitingForPacket;
-                        } else {
-                            self.decrypt_packet_at(key, nonce, offset);
-                        }
-                    }
-
-                    self.shift_left(offset);
-                    match self.mode {
-                        HoldsPlaintextPacket {
-                            offset: o,
-                            header_index: h,
-                        } => {
-                            self.mode = HoldsPlaintextPacket {
-                                offset: o,
-                                header_index: 0,
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    return max_readable as usize;
-                }
-
-            }
-            _ => unreachable!(),
+        unsafe {
+            ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(self.offset as isize),
+                                     out.as_mut_ptr(),
+                                     max_readable as usize);
         }
+        let offset = self.offset + max_readable;
+
+        // done reading, now update mode
+
+        // if (remaining_plaintext != 0) && (out.len() as u16) < packet_len {
+        if (out.len() as u16) < remaining_plaintext {
+            // we have more plaintext, but the `out` buffer is full
+            self.mode = Readable; // TODO is this necessary?
+            self.offset = offset;
+            println!("{}", "  << leaving read_to with more plaintext available");
+            return max_readable as usize;
+        } else {
+            // we don't have more plaintext to fill the outbuffer
+
+            if self.last < offset + CYPHER_HEADER_SIZE as u16 {
+                self.mode = WaitingForHeader;
+                println!("{}", "  << waiting for header");
+            } else {
+                // decrypt header to see whether we have a full packet buffered
+                // TODO check return value of decrypt_header_at and handle failure
+                assert!(self.decrypt_header_at(key, nonce, offset));
+
+                let cypher_packet_len = self.cypher_packet_len_at(offset);
+                if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
+                    self.mode = WaitingForPacket;
+                    println!("{}", "  << waiting for packet");
+                } else {
+                    self.decrypt_packet_at(key, nonce, offset);
+                    println!("  << decrypted packet at {}", offset);
+                }
+            }
+
+            self.shift_left(offset);
+            println!("{}", "      shifted left");
+            if self.mode == Readable {
+                // TODO is the check necessary? can this be moved to shift_left?
+                self.offset = CYPHER_HEADER_SIZE as u16;
+                self.header_index = 0;
+            }
+            // self.offset = offset;
+
+            return max_readable as usize;
+        }
+
+
+
     }
 
     fn fill<R: Read>(&mut self,
@@ -290,17 +281,14 @@ fn do_read<R: Read>(out: &mut [u8],
         buffer.fill(reader, key, nonce)?;
     }
 
-    while let HoldsPlaintextPacket {
-                  offset,
-                  header_index,
-              } = buffer.mode {
+    while let Readable = buffer.mode {
         println!("total_read: {:?}", total_read);
         println!("out.len(): {:?}", out.len());
         if total_read >= out.len() {
             break;
         }
         total_read += buffer.read_to(&mut out[total_read..], key, nonce);
-        println!("{}", "  returned from read_to");
+        println!("  returned from read_to in mode {:?}", buffer.mode);
     }
 
     println!("return from do_read: {:?}\n", total_read);

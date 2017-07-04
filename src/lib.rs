@@ -22,3 +22,6 @@ pub trait BoxWriter: Write {
     /// may be called.
     fn shutdown(&mut self) -> io::Result<()>;
 }
+
+// TODO add duplex stream
+// TODO add async wrappers
