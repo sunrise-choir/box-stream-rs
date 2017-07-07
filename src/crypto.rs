@@ -36,6 +36,11 @@ impl PlainHeader {
     pub fn get_packet_mac(&self) -> [u8; secretbox::MACBYTES] {
         self.packet_mac
     }
+
+    /// Returns whether this header signals the end of the stream.
+    pub fn is_final_header(&self) -> bool {
+        unsafe { bs_is_final_header(self) }
+    }
 }
 
 extern "C" {
@@ -96,13 +101,6 @@ pub unsafe fn final_header(out: &mut [u8; CYPHER_HEADER_SIZE],
                            encryption_key: &[u8; secretbox::KEYBYTES],
                            nonce: &[u8; secretbox::NONCEBYTES]) {
     bs_final_header(out, encryption_key, nonce);
-}
-
-impl PlainHeader {
-    /// Returns whether this header signals the end of the stream.
-    pub fn is_final_header(&self) -> bool {
-        unsafe { bs_is_final_header(self) }
-    }
 }
 
 /// If this returns true, it decrypts a received header into `out`. Returns false

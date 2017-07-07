@@ -1,11 +1,16 @@
 // Implementation of BoxReader, a wrapper for readers that dencrypts all writes and handles buffering.
 
-use std::io::Read;
+use std::io::{Read, ErrorKind};
 use std::{io, cmp, mem, u16, ptr};
 use sodiumoxide::crypto::secretbox;
 
 use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader,
              decrypt_header_inplace, decrypt_packet_inplace};
+
+/// The error value used by `read` to signal that a final header has been read.
+///
+/// See `BoxReader::read` for more details.
+pub const FINAL_ERROR: &'static str = "final";
 
 /// Wraps a reader, decrypting all reads.
 pub struct BoxReader<R: Read> {
@@ -44,6 +49,16 @@ impl<R: Read> BoxReader<R> {
 }
 
 impl<R: Read> Read for BoxReader<R> {
+    /// Read bytes from the wrapped reader and decrypt them.
+    ///
+    /// # Errors
+    /// In addition to propagating all errors from the wrapped reader, a
+    /// `BoxReader` produces the following error kinds:
+    ///
+    /// - `ErrorKind::InvalidData`: If data could not be decrypted, or if a
+    /// header declares an invalid length.
+    /// - `ErrorKind::Other`: This is used to signal that a final header has
+    /// been read. In this case, the error value is `FINAL_ERROR`.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         do_read(buf,
                 &mut self.inner,
@@ -66,6 +81,7 @@ struct ReaderBuffer {
     offset: u16, // where in the buffer to read from next (only relevant in Readable)
     header_index: u16, // points to the plain header of the currently read package (only relevant in Readable)
     mode: ReaderBufferMode,
+    err: BufErr,
 }
 
 #[derive(PartialEq, Debug)]
@@ -75,6 +91,13 @@ enum ReaderBufferMode {
     Readable,
 }
 use self::ReaderBufferMode::*;
+
+#[derive(PartialEq)]
+enum BufErr {
+    None,
+    InvalidData,
+    FinalHeader,
+}
 
 impl ReaderBufferMode {
     fn is_waiting(&self) -> bool {
@@ -95,6 +118,7 @@ impl ReaderBuffer {
             offset: 0,
             header_index: 0,
             mode: WaitingForHeader,
+            err: BufErr::None,
         }
     }
 
@@ -211,6 +235,12 @@ impl ReaderBuffer {
                 // TODO check return value of decrypt_header_at and handle failure
                 assert!(self.decrypt_header_at(key, nonce, offset));
 
+                let plain_header = self.plain_header_at(offset);
+                if plain_header.is_final_header() {
+                    self.err = BufErr::FinalHeader;
+                    return max_readable as usize;
+                }
+
                 let cypher_packet_len = self.cypher_packet_len_at(offset);
                 if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
                     self.mode = WaitingForPacket;
@@ -247,6 +277,12 @@ impl ReaderBuffer {
                 // TODO check return value of decrypt_header_at and handle failure
                 assert!(self.decrypt_header_at(key, nonce, 0));
             }
+            let plain_header = self.plain_header_at(0);
+            if plain_header.is_final_header() {
+                self.err = BufErr::FinalHeader;
+                return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
+            }
+
             let cypher_packet_len = self.cypher_packet_len_at(0);
 
             if self.last < CYPHER_HEADER_SIZE as u16 + cypher_packet_len {
@@ -267,25 +303,37 @@ fn do_read<R: Read>(out: &mut [u8],
                     nonce: &mut secretbox::Nonce,
                     buffer: &mut ReaderBuffer)
                     -> io::Result<usize> {
-
-    let mut total_read = 0;
-    if buffer.mode.is_waiting() {
-        buffer.fill(reader, key, nonce)?;
-    }
-
-    while let Readable = buffer.mode {
-        println!("total_read: {:?}", total_read);
-        println!("out.len(): {:?}", out.len());
-        if total_read >= out.len() {
-            break;
+    match buffer.err {
+        BufErr::FinalHeader => {
+            return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
         }
-        total_read += buffer.read_to(&mut out[total_read..], key, nonce);
-        println!("  returned from read_to in mode {:?}", buffer.mode);
+        BufErr::InvalidData => {
+            return Err(io::Error::new(ErrorKind::InvalidData, "")); // TODO different messages for decryption error and invalid header length
+        }
+        BufErr::None => {
+            let mut total_read = 0;
+            if buffer.mode.is_waiting() {
+                buffer.fill(reader, key, nonce)?;
+            }
+
+            while let Readable = buffer.mode {
+                if buffer.err != BufErr::None {
+                    break;
+                }
+                println!("total_read: {:?}", total_read);
+                println!("out.len(): {:?}", out.len());
+                if total_read >= out.len() {
+                    break;
+                }
+                total_read += buffer.read_to(&mut out[total_read..], key, nonce);
+                println!("  returned from read_to in mode {:?}", buffer.mode);
+            }
+
+            println!("return from do_read: {:?}\n", total_read);
+
+            return Ok(total_read);
+        }
     }
-
-    println!("return from do_read: {:?}\n", total_read);
-
-    return Ok(total_read);
 }
 
 // TODO call crypto::is_final_header somewhere
