@@ -12,6 +12,11 @@ use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader,
 /// See `BoxReader::read` for more details.
 pub const FINAL_ERROR: &'static str = "final";
 
+/// The error value used by `read` to signal that a header claims an invalid length.
+///
+/// See `BoxReader::read` for more details.
+pub const INVALID_LENGTH: &'static str = "length";
+
 /// Wraps a reader, decrypting all reads.
 pub struct BoxReader<R: Read> {
     inner: R,
@@ -56,7 +61,8 @@ impl<R: Read> Read for BoxReader<R> {
     /// `BoxReader` produces the following error kinds:
     ///
     /// - `ErrorKind::InvalidData`: If data could not be decrypted, or if a
-    /// header declares an invalid length.
+    /// header declares an invalid length. Possible error values are
+    /// `INVALID_LENGTH`, TODO, TODO.
     /// - `ErrorKind::Other`: This is used to signal that a final header has
     /// been read. In this case, the error value is `FINAL_ERROR`.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -95,7 +101,7 @@ use self::ReaderBufferMode::*;
 #[derive(PartialEq)]
 enum BufErr {
     None,
-    InvalidData,
+    InvalidLength,
     FinalHeader,
 }
 
@@ -242,6 +248,12 @@ impl ReaderBuffer {
                 }
 
                 let cypher_packet_len = self.cypher_packet_len_at(offset);
+
+                if cypher_packet_len > MAX_PACKET_SIZE {
+                    self.err = BufErr::InvalidLength;
+                    return max_readable as usize;
+                }
+
                 if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
                     self.mode = WaitingForPacket;
                     println!("{}", "  << waiting for packet");
@@ -285,6 +297,11 @@ impl ReaderBuffer {
 
             let cypher_packet_len = self.cypher_packet_len_at(0);
 
+            if cypher_packet_len > MAX_PACKET_SIZE {
+                self.err = BufErr::InvalidLength;
+                return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH));
+            }
+
             if self.last < CYPHER_HEADER_SIZE as u16 + cypher_packet_len {
                 self.mode = WaitingForPacket;
                 return Ok(());
@@ -307,8 +324,8 @@ fn do_read<R: Read>(out: &mut [u8],
         BufErr::FinalHeader => {
             return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
         }
-        BufErr::InvalidData => {
-            return Err(io::Error::new(ErrorKind::InvalidData, "")); // TODO different messages for decryption error and invalid header length
+        BufErr::InvalidLength => {
+            return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH)); // TODO decryption errors
         }
         BufErr::None => {
             let mut total_read = 0;
@@ -335,5 +352,3 @@ fn do_read<R: Read>(out: &mut [u8],
         }
     }
 }
-
-// TODO call crypto::is_final_header somewhere

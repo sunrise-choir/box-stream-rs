@@ -608,9 +608,35 @@ fn test_reader_partially_buffered_packet() {
     assert_eq!(buf[..3000], plain_data[..3000]);
 }
 
-// reader signals a final header via an error (detected in the read_to method)
-#[test]
+// reader signals a final header via an error (detected in the fill method)
+// #[test]
 fn test_reader_final_fill() {
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut inner = Vec::new();
+    let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
+
+    assert!(b.shutdown().is_ok());
+    let data = b.into_inner();
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data[..]));
+
+    let mut u = BoxReader::new(r, key, nonce);
+    let mut buf = [0u8; MAX_PACKET_USIZE + 42];
+
+    let err = u.read(&mut buf).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Other);
+    assert_eq!(err.get_ref().unwrap().description(), FINAL_ERROR);
+}
+
+// reader signals a final header via an error (detected in the read_to method)
+// #[test]
+fn test_reader_final_read_to() {
     let plain_data = [1u8; 8];
 
     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
@@ -639,30 +665,57 @@ fn test_reader_final_fill() {
     assert_eq!(err.get_ref().unwrap().description(), FINAL_ERROR);
 }
 
-// reader signals a final header via an error (detected in the fill method)
-#[test]
-fn test_reader_final_read_to() {
+// error if a header claims a packet length greater than MAX_PACKET_SIZE (detected in the fill method)
+// #[test]
+fn test_reader_invalid_header_length_fill() {
+    let data = [
+        134, 136, 61, 222, 64, 40, 115, 70, 89, 234, 107, 136, 44, 9, 218, 181, 128, 183, 167, 135, 29, 34, 215, 168, 224, 32, 56, 173, 249, 11, 196, 119, 199, 201 // a correctly authenticated header which claims a packet length of MAX_PACKET_SIZE + 1
+    ];
+
     let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
                               179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
                               7, 34, 157, 174, 24]);
     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
-    let mut inner = Vec::new();
-    let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
-
-    assert!(b.shutdown().is_ok());
-    let data = b.into_inner();
-
     let mut r = TestReader::new();
-    r.push(TestReaderMode::Read(&data[..]));
+    r.push(TestReaderMode::Read(&data));
 
     let mut u = BoxReader::new(r, key, nonce);
-    let mut buf = [0u8; MAX_PACKET_USIZE + 42];
+    let mut buf = [0u8; 8];
 
     let err = u.read(&mut buf).unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::Other);
-    assert_eq!(err.get_ref().unwrap().description(), FINAL_ERROR);
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+    assert_eq!(err.get_ref().unwrap().description(), INVALID_LENGTH);
+}
+
+// error if a header claims a packet length greater than MAX_PACKET_SIZE (detected in the fill method)
+// #[test]
+fn test_reader_invalid_header_length_read_to() {
+    let data = [
+        181u8, 28, 106, 117, 226, 186, 113, 206, 135, 153, 250, 54, 221, 225, 178, 211,
+        144, 190, 14, 102, 102, 246, 118, 54, 195, 34, 174, 182, 190, 45, 129, 48, 96,
+        193, // end header 1, index: 34
+        231, 234, 80, 195, 113, 173, 5, 158, // end data 1, index: 42
+        236, 107, 35, 168, 100, 101, 145, 214, 255, 46, 108, 70, 213, 184, 252, 221, 179, 204, 219, 5, 217, 233, 224, 145, 21, 125, 151, 108, 164, 18, 34, 90, 41, 202 // a correctly authenticated header which claims a packet length of MAX_PACKET_SIZE + 1
+    ];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data));
+
+    let mut u = BoxReader::new(r, key, nonce);
+    let mut buf = [0u8; 32];
+
+    assert_eq!(u.read(&mut buf).unwrap(), 8);
+    let err = u.read(&mut buf).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+    assert_eq!(err.get_ref().unwrap().description(), INVALID_LENGTH);
 }
 
 
@@ -752,7 +805,7 @@ fn test_writer_random() {
 }
 
 // read data with a randomly behaving inner reader, and ensure it reads correctly
-// #[test]
+#[test]
 fn test_reader_random() {
     // number of writes to test
     let writes = 10000; // TODO set to 100000
