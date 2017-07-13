@@ -17,6 +17,16 @@ pub const FINAL_ERROR: &'static str = "final";
 /// See `BoxReader::read` for more details.
 pub const INVALID_LENGTH: &'static str = "length";
 
+/// The error value used by `read` to signal that a header is not correctly authenticated.
+///
+/// See `BoxReader::read` for more details.
+pub const UNAUTHENTICATED_HEADER: &'static str = "header_auth";
+
+/// The error value used by `read` to signal that a packet is not correctly authenticated.
+///
+/// See `BoxReader::read` for more details.
+pub const UNAUTHENTICATED_PACKET: &'static str = "packet_auth";
+
 /// Wraps a reader, decrypting all reads.
 pub struct BoxReader<R: Read> {
     inner: R,
@@ -62,7 +72,7 @@ impl<R: Read> Read for BoxReader<R> {
     ///
     /// - `ErrorKind::InvalidData`: If data could not be decrypted, or if a
     /// header declares an invalid length. Possible error values are
-    /// `INVALID_LENGTH`, TODO, TODO.
+    /// `INVALID_LENGTH`, `UNAUTHENTICATED_HEADER`, `UNAUTHENTICATED_PACKET`.
     /// - `ErrorKind::Other`: This is used to signal that a final header has
     /// been read. In this case, the error value is `FINAL_ERROR`.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -103,6 +113,8 @@ enum BufErr {
     None,
     InvalidLength,
     FinalHeader,
+    UnauthenticatedHeader,
+    UnauthenticatedPacket,
 }
 
 impl ReaderBufferMode {
@@ -177,7 +189,7 @@ impl ReaderBuffer {
         let plain_header = self.plain_header_at(header_index);
         let packet_len = plain_header.get_packet_len();
 
-        debug_assert!(packet_len <= MAX_PACKET_SIZE); // TODO correct handling of this
+        debug_assert!(packet_len <= MAX_PACKET_SIZE);
 
         unsafe {
             assert!(decrypt_packet_inplace(self.buffer
@@ -238,8 +250,10 @@ impl ReaderBuffer {
                 println!("{}", "  << waiting for header");
             } else {
                 // decrypt header to see whether we have a full packet buffered
-                // TODO check return value of decrypt_header_at and handle failure
-                assert!(self.decrypt_header_at(key, nonce, offset));
+                if !self.decrypt_header_at(key, nonce, offset) {
+                    self.err = BufErr::UnauthenticatedHeader;
+                    return max_readable as usize;
+                }
 
                 let plain_header = self.plain_header_at(offset);
                 if plain_header.is_final_header() {
@@ -286,8 +300,12 @@ impl ReaderBuffer {
             return Ok(());
         } else {
             if self.mode == WaitingForHeader {
+                if !self.decrypt_header_at(key, nonce, 0) {
+                    self.err = BufErr::UnauthenticatedHeader;
+                    return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER));
+                }
                 // TODO check return value of decrypt_header_at and handle failure
-                assert!(self.decrypt_header_at(key, nonce, 0));
+                // assert!(self.decrypt_header_at(key, nonce, 0));
             }
             let plain_header = self.plain_header_at(0);
             if plain_header.is_final_header() {
@@ -325,7 +343,13 @@ fn do_read<R: Read>(out: &mut [u8],
             return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
         }
         BufErr::InvalidLength => {
-            return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH)); // TODO decryption errors
+            return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH));
+        }
+        BufErr::UnauthenticatedHeader => {
+            return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER));
+        }
+        BufErr::UnauthenticatedPacket => {
+            return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET));
         }
         BufErr::None => {
             let mut total_read = 0;
