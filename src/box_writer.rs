@@ -3,6 +3,8 @@
 use std::io::Write;
 use std::io;
 use sodiumoxide::crypto::secretbox;
+use futures::{Poll, Async};
+use tokio_io::AsyncWrite;
 
 use impl_writing::*;
 
@@ -50,7 +52,7 @@ impl<W: Write> BoxWriter<W> {
     /// may be called.
     /// If this returns an error, it may be safely called again. Only once this
     /// returns `Ok(())` the final header is guaranteed to have been written.
-    pub fn shutdown(&mut self) -> io::Result<()> {
+    pub fn write_final_header(&mut self) -> io::Result<()> {
         do_shutdown(&mut self.inner,
                     &self.key,
                     &mut self.nonce,
@@ -69,5 +71,12 @@ impl<W: Write> Write for BoxWriter<W> {
 
     fn flush(&mut self) -> io::Result<()> {
         do_flush(&mut self.inner, &mut self.buffer)
+    }
+}
+
+impl<AW: AsyncWrite> AsyncWrite for BoxWriter<AW> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        try_nb!(self.write_final_header());
+        Ok(Async::Ready(()))
     }
 }

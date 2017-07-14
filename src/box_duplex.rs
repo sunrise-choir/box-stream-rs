@@ -1,6 +1,8 @@
 use std::io::{Read, Write};
 use std::io;
 use sodiumoxide::crypto::secretbox;
+use futures::{Poll, Async};
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use impl_reading::*;
 use impl_writing::*;
@@ -54,7 +56,7 @@ impl<S: Write + Read> BoxDuplex<S> {
     /// of the `BoxDuplex` may be called.
     /// If this returns an error, it may be safely called again. Only once this
     /// returns `Ok(())` the final header is guaranteed to have been written.
-    pub fn shutdown(&mut self) -> io::Result<()> {
+    pub fn write_final_header(&mut self) -> io::Result<()> {
         do_shutdown(&mut self.inner,
                     &self.key,
                     &mut self.encryption_nonce,
@@ -94,5 +96,14 @@ impl<S: Read + Write> Write for BoxDuplex<S> {
 
     fn flush(&mut self) -> io::Result<()> {
         do_flush(&mut self.inner, &mut self.writer_buffer)
+    }
+}
+
+impl<AS: AsyncRead + AsyncWrite> AsyncRead for BoxDuplex<AS> {}
+
+impl<AS: AsyncRead + AsyncWrite> AsyncWrite for BoxDuplex<AS> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        try_nb!(self.write_final_header());
+        Ok(Async::Ready(()))
     }
 }

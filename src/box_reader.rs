@@ -3,6 +3,7 @@
 use std::io::Read;
 use std::io;
 use sodiumoxide::crypto::secretbox;
+use tokio_io::AsyncRead;
 
 use impl_reading::*;
 
@@ -64,3 +65,5 @@ impl<R: Read> Read for BoxReader<R> {
                 &mut self.buffer)
     }
 }
+
+impl<AR: AsyncRead> AsyncRead for BoxReader<AR> {}

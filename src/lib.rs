@@ -1,10 +1,13 @@
 //! Implementation of the [box-stream](https://github.com/dominictarr/pull-box-stream)
 //! encryption protocol. This crate provides structs which wrap readers and/or
 //! writers, decrypting all reads and encrypting all writes. Also provides
-//! wrappers for [tokio](https://tokio.rs/)'s asynchronous readers and writers.
+//! [tokio](https://tokio.rs/)'s asynchronous reade and write traits.
 
 extern crate libc;
 extern crate sodiumoxide;
+extern crate futures;
+#[macro_use(try_nb)]
+extern crate tokio_io;
 
 pub mod crypto;
 mod impl_writing;
