@@ -18,6 +18,8 @@ pub struct WriterBuffer {
     offset: u16,
     // Length of the data that is actually relevant, everything from buffer[length] is useless data from a previous packet.
     length: u16,
+    // set to true to indicate that a final header has been written and should not be written again.
+    done: bool,
 }
 
 impl WriterBuffer {
@@ -26,6 +28,7 @@ impl WriterBuffer {
             buffer: unsafe { mem::uninitialized() },
             offset: CYPHER_HEADER_SIZE as u16 + MAX_PACKET_SIZE,
             length: 0,
+            done: false,
         }
     }
 
@@ -96,21 +99,23 @@ pub fn do_flush<W: Write>(writer: &mut W, buffer: &mut WriterBuffer) -> io::Resu
 }
 
 // Implements box shutdown. The different streams delegate to this in `shutdown`.
-// TODO make sure to only write one final header until this returns a ok
 pub fn do_shutdown<W: Write>(writer: &mut W,
                              key: &secretbox::Key,
                              nonce: &secretbox::Nonce,
                              buffer: &mut WriterBuffer)
                              -> io::Result<()> {
-    buffer.flush_to(writer)?;
+    if !buffer.done {
+        buffer.flush_to(writer)?;
 
-    unsafe {
-        final_header(&mut *(buffer.buffer.as_mut_ptr() as *mut [u8; CYPHER_HEADER_SIZE]),
-                     &key.0,
-                     &nonce.0);
+        unsafe {
+            final_header(&mut *(buffer.buffer.as_mut_ptr() as *mut [u8; CYPHER_HEADER_SIZE]),
+                         &key.0,
+                         &nonce.0);
+        }
+        buffer.offset = 0;
+        buffer.length = CYPHER_HEADER_SIZE as u16;
+        buffer.done = true;
     }
-    buffer.offset = 0;
-    buffer.length = CYPHER_HEADER_SIZE as u16;
 
     buffer.flush_to(writer)?;
     writer.flush()
