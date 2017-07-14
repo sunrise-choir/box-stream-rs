@@ -220,20 +220,24 @@ impl ReaderBuffer {
         }
     }
 
+    // the result is Ok(true) when the underlying read call returned Ok(0)
     pub fn fill<R: Read>(&mut self,
                          reader: &mut R,
                          key: &secretbox::Key,
                          nonce: &mut secretbox::Nonce)
-                         -> io::Result<()> {
+                         -> io::Result<bool> {
         debug_assert!(self.mode == WaitingForHeader || self.mode == WaitingForPacket);
 
         let read = reader.read(&mut self.buffer[self.last as usize..])?;
+        if read == 0 {
+            return Ok(true);
+        }
         self.last += read as u16;
 
         if self.last < CYPHER_HEADER_SIZE as u16 {
             // this is only reached in mode == WaitingForHeader, so no need to set that again
             debug_assert!(self.mode == WaitingForHeader);
-            return Ok(());
+            return Ok(false);
         } else {
             if self.mode == WaitingForHeader {
                 if !self.decrypt_header_at(key, nonce, 0) {
@@ -253,12 +257,12 @@ impl ReaderBuffer {
 
             if self.last < CYPHER_HEADER_SIZE as u16 + cypher_packet_len {
                 self.mode = WaitingForPacket;
-                return Ok(());
+                return Ok(false);
             } else {
                 if !self.decrypt_packet_at(key, nonce, 0) {
                     return Err(self.set_err(BufErr::UnauthenticatedPacket));
                 }
-                return Ok(());
+                return Ok(false);
             }
         }
     }
@@ -275,7 +279,9 @@ pub fn do_read<R: Read>(out: &mut [u8],
         BufErr::None => {
             let mut total_read = 0;
             if buffer.mode.is_waiting() {
-                buffer.fill(reader, key, nonce)?;
+                if buffer.fill(reader, key, nonce)? {
+                    return Ok(0);
+                }
             }
 
             while let Readable = buffer.mode {
@@ -288,7 +294,11 @@ pub fn do_read<R: Read>(out: &mut [u8],
                 total_read += buffer.read_to(&mut out[total_read..], key, nonce);
             }
 
-            Ok(total_read)
+            if total_read == 0 {
+                Err(io::Error::new(ErrorKind::WouldBlock, "need_data"))
+            } else {
+                Ok(total_read)
+            }
         }
         _ => Err(make_io_error(&buffer.err)),
     }

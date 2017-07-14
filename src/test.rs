@@ -447,7 +447,7 @@ fn test_reader_slow_inner() {
     let mut r = TestReader::new();
     r.push(TestReaderMode::Read(&data[0..16]));
     r.push(TestReaderMode::Read(&data[16..32]));
-    r.push(TestReaderMode::Error(Error::new(ErrorKind::WouldBlock, "simulating WouldBlock error")));
+    r.push(TestReaderMode::Error(Error::new(ErrorKind::NotFound, "simulating NotFound error")));
     r.push(TestReaderMode::Read(&data[32..48]));
     r.push(TestReaderMode::Read(&data[48..64]));
     r.push(TestReaderMode::Read(&data[64..80]));
@@ -457,9 +457,9 @@ fn test_reader_slow_inner() {
     let mut buf = [0u8; 6];
 
     // Read, but inner reader is too slow
-    assert_eq!(u.read(&mut buf).unwrap(), 0);
-    assert_eq!(u.read(&mut buf).unwrap(), 0);
     assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::NotFound);
     assert_eq!(u.read(&mut buf).unwrap(), 6);
     assert_eq!(buf, [0, 1, 2, 3, 4, 5]);
     // read the next 6 bytes, but only two are available
@@ -467,8 +467,8 @@ fn test_reader_slow_inner() {
     assert_eq!(buf[..2], [6, 7]);
     // next inner call to read should happen here
     // read the next 6 bytes
-    assert_eq!(u.read(&mut buf).unwrap(), 0);
-    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
     assert_eq!(u.read(&mut buf).unwrap(), 6);
     assert_eq!(buf, [7, 6, 5, 4, 3, 2]);
     // read the last 2 bytes, which are buffered already
@@ -538,7 +538,8 @@ fn test_reader_fast2() {
 
     assert_eq!(u.read(&mut buf).unwrap(), 8);
     assert_eq!(buf[..8], [0, 1, 2, 3, 4, 5, 6, 7]);
-    assert_eq!(u.read(&mut buf).unwrap(), 0);
+    // assert_eq!(u.read(&mut buf).unwrap(), 0);
+    assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
     assert_eq!(u.read(&mut buf).unwrap_err().kind(), ErrorKind::WouldBlock);
     assert_eq!(u.read(&mut buf).unwrap(), 8);
     assert_eq!(buf[..8], [7, 6, 5, 4, 3, 2, 1, 0]);
@@ -825,6 +826,26 @@ fn test_reader_unauthenticated_packet_read_to() {
     let err = u.read(&mut buf).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidData);
     assert_eq!(err.get_ref().unwrap().description(), UNAUTHENTICATED_PACKET);
+}
+
+// When an inner `read` call returns Ok(0), the BoxReader should return Ok(0) as well.
+#[test]
+fn test_reader_eof() {
+    let data = [];
+
+    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
+                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
+                              7, 34, 157, 174, 24]);
+    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
+                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+
+    let mut r = TestReader::new();
+    r.push(TestReaderMode::Read(&data));
+
+    let mut u = BoxReader::new(r, key, nonce);
+    let mut buf = [0u8; 32];
+
+    assert_eq!(u.read(&mut buf).unwrap(), 0);
 }
 
 // write data with a randomly behaving inner writer, and ensure it writes correctly
