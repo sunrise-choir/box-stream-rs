@@ -7,8 +7,6 @@ use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader,
 
 const READ_BUFFER_SIZE: usize = CYPHER_HEADER_SIZE + MAX_PACKET_USIZE;
 
-// TODO make these errors part of the crate's public api
-
 /// The error value used by `read` to signal that a final header has been read.
 ///
 /// See `BoxReader::read` for more details.
