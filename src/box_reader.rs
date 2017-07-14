@@ -185,24 +185,28 @@ impl ReaderBuffer {
     fn decrypt_packet_at(&mut self,
                          key: &secretbox::Key,
                          nonce: &mut secretbox::Nonce,
-                         header_index: u16) {
+                         header_index: u16)
+                         -> bool {
         let plain_header = self.plain_header_at(header_index);
         let packet_len = plain_header.get_packet_len();
 
         debug_assert!(packet_len <= MAX_PACKET_SIZE);
 
         unsafe {
-            assert!(decrypt_packet_inplace(self.buffer
-                                               .as_mut_ptr()
-                                               .offset(header_index as isize +
-                                                       CYPHER_HEADER_SIZE as isize),
-                                           &plain_header,
-                                           &key.0,
-                                           &mut nonce.0)); // TODO handle this
+            if !decrypt_packet_inplace(self.buffer
+                                           .as_mut_ptr()
+                                           .offset(header_index as isize +
+                                                   CYPHER_HEADER_SIZE as isize),
+                                       &plain_header,
+                                       &key.0,
+                                       &mut nonce.0) {
+                return false;
+            }
         }
         self.offset = CYPHER_HEADER_SIZE as u16;
         self.header_index = header_index;
         self.mode = Readable; // TODO is this needed?
+        true
     }
 
     fn read_to(&mut self,
@@ -272,7 +276,10 @@ impl ReaderBuffer {
                     self.mode = WaitingForPacket;
                     println!("{}", "  << waiting for packet");
                 } else {
-                    self.decrypt_packet_at(key, nonce, offset);
+                    if !self.decrypt_packet_at(key, nonce, offset) {
+                        self.err = BufErr::UnauthenticatedPacket;
+                        return max_readable as usize;
+                    }
                     println!("  << decrypted packet at {}", offset);
                 }
             }
@@ -304,8 +311,6 @@ impl ReaderBuffer {
                     self.err = BufErr::UnauthenticatedHeader;
                     return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER));
                 }
-                // TODO check return value of decrypt_header_at and handle failure
-                // assert!(self.decrypt_header_at(key, nonce, 0));
             }
             let plain_header = self.plain_header_at(0);
             if plain_header.is_final_header() {
@@ -324,7 +329,10 @@ impl ReaderBuffer {
                 self.mode = WaitingForPacket;
                 return Ok(());
             } else {
-                self.decrypt_packet_at(key, nonce, 0);
+                if !self.decrypt_packet_at(key, nonce, 0) {
+                    self.err = BufErr::InvalidLength;
+                    return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET));
+                }
                 return Ok(());
             }
         }
