@@ -3,6 +3,8 @@
 //! writers, decrypting all reads and encrypting all writes. Also provides
 //! [tokio](https://tokio.rs/)'s asynchronous reade and write traits.
 
+#![deny(missing_docs)]
+
 extern crate libc;
 extern crate sodiumoxide;
 extern crate futures;
@@ -24,5 +26,3 @@ pub use box_duplex::*;
 
 #[cfg(test)]
 mod test;
-
-// TODO add async wrappers
