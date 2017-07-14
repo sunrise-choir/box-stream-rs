@@ -8,8 +8,7 @@ use std::io::{Write, Read};
 use std::io::{Error, ErrorKind};
 use std::collections::VecDeque;
 
-use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_SIZE, MAX_PACKET_USIZE, PlainHeader, decrypt_header,
-             decrypt_packet};
+use crypto::{CYPHER_HEADER_SIZE, MAX_PACKET_USIZE, PlainHeader, decrypt_header, decrypt_packet};
 use sodiumoxide::crypto::secretbox;
 
 use test::rand::Rand;
@@ -251,7 +250,7 @@ fn test_writer_larger_then_buffer_fancy() {
     assert_eq!(b.write(&[0; MAX_PACKET_USIZE + 1]).unwrap(),
                MAX_PACKET_USIZE);
     // buffered data is written to w
-    assert_eq!(b.write(&[123, 456]).unwrap(), 0);
+    assert_eq!(b.write(&[123, 200]).unwrap(), 0);
     // write more than MAX_PACKET_USIZE => Only MAX_PACKET_USIZE are consumed, even though w could write more
     assert_eq!(b.write(&[1; MAX_PACKET_USIZE + 42]).unwrap(),
                MAX_PACKET_USIZE);
@@ -356,10 +355,8 @@ impl<'a> Read for TestReader<'a> {
                 match mode {
                     TestReaderMode::Error(e) => return Err(e),
                     TestReaderMode::Read(data) => {
-                        let mut count = 0;
                         for (i, byte) in data.iter().take(buf.len()).enumerate() {
                             buf[i] = *byte;
-                            count += 1;
                         }
                         return Ok(cmp::min(data.len(), buf.len()));
                     }
@@ -558,7 +555,7 @@ fn test_reader_max_size() {
     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
-    let mut inner = Vec::new();
+    let inner = Vec::new();
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
     assert!(b.write_all(&plain_data).is_ok());
@@ -588,7 +585,7 @@ fn test_reader_partially_buffered_packet() {
     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
-    let mut inner = Vec::new();
+    let inner = Vec::new();
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
     assert!(b.write(&plain_data).is_ok());
@@ -617,7 +614,7 @@ fn test_reader_final_fill() {
     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
-    let mut inner = Vec::new();
+    let inner = Vec::new();
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
     assert!(b.shutdown().is_ok());
@@ -645,7 +642,7 @@ fn test_reader_final_read_to() {
     let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
-    let mut inner = Vec::new();
+    let inner = Vec::new();
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
     assert!(b.write(&plain_data).is_ok());
@@ -846,7 +843,7 @@ fn test_writer_random() {
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
     let mut w = TestWriter::new();
-    for i in 0..writes {
+    for _ in 0..writes {
         let rnd = f32::rand(&mut rand::thread_rng());
 
         if rnd < 0.1 {
@@ -875,13 +872,13 @@ fn test_writer_random() {
     while b.get_ref().remaining_writes() > 0 {
         let rnd = f32::rand(&mut rand::thread_rng());
         // some of these get ignored because the TestWrite might be too slow
-        b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]);
+        let _ = b.write(&plain_data[..(rnd * (MAX_PACKET_USIZE + 42) as f32) as usize]);
     }
-    b.flush();
+    assert!(b.flush().is_ok());
     cypher_text.extend(b.get_ref().inner());
 
     // decrypt everything
-    let mut decryption_key = key.clone();
+    let decryption_key = key.clone();
     let mut decryption_nonce = nonce.clone();
     let mut offset = 0usize;
     let mut decrypted_header = PlainHeader::new();
@@ -931,7 +928,7 @@ fn test_reader_random() {
                                   63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
 
     let mut w = TestWriter::new();
-    for i in 0..writes {
+    for _ in 0..writes {
         let rnd = f32::rand(&mut rand::thread_rng());
 
         if rnd < 0.1 {
@@ -966,11 +963,11 @@ fn test_reader_random() {
             Err(_) => {}
         }
     }
-    b.flush();
+    assert!(b.flush().is_ok());
     cypher_text.extend(b.get_ref().inner());
 
     // decrypt everything
-    let mut r = RandomReader::new(cypher_text);
+    let r = RandomReader::new(cypher_text);
     let mut u = BoxReader::new(r, key.clone(), nonce.clone());
 
     let mut total_read = 0usize;

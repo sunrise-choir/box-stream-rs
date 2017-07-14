@@ -1,4 +1,4 @@
-// Implementation of BoxReader, a wrapper for readers that dencrypts all writes and handles buffering.
+// Implementation of BoxReader, a wrapper for readers that decrypts all writes and handles buffering.
 
 use std::io::{Read, ErrorKind};
 use std::{io, cmp, mem, u16, ptr};
@@ -126,8 +126,6 @@ impl ReaderBufferMode {
     }
 }
 
-// TODO malicious peer could send headers with a length greater than MAX_PACKET_SIZE
-// how should that be handled?
 impl ReaderBuffer {
     fn new() -> ReaderBuffer {
         ReaderBuffer {
@@ -205,8 +203,14 @@ impl ReaderBuffer {
         }
         self.offset = CYPHER_HEADER_SIZE as u16;
         self.header_index = header_index;
-        self.mode = Readable; // TODO is this needed?
+        self.mode = Readable;
         true
+    }
+
+    fn set_err(&mut self, e: BufErr) -> io::Error {
+        let ret = make_io_error(&e);
+        self.err = e;
+        ret
     }
 
     fn read_to(&mut self,
@@ -214,22 +218,15 @@ impl ReaderBuffer {
                key: &secretbox::Key,
                nonce: &mut secretbox::Nonce)
                -> usize {
-        println!("  {}", "entered read_to");
         debug_assert!(self.mode == Readable);
 
-        println!("  offset: {:?}", self.offset);
-        println!("  header_index: {:?}", self.header_index);
-        let tmp = self.header_index; // TODO this is ugly
+        let tmp = self.header_index;
         let packet_len = self.cypher_packet_len_at(tmp);
-        println!("  packet_len: {:?}", packet_len);
         let remaining_plaintext = self.header_index + CYPHER_HEADER_SIZE as u16 + packet_len -
                                   self.offset;
-        println!("  remaining_plaintext: {:?}", remaining_plaintext);
 
         // let max_readable = cmp::min(cmp::min(out.len() as u16, packet_len), remaining_plaintext);
         let max_readable = cmp::min(out.len() as u16, remaining_plaintext);
-        println!("  max_readable: {:?}", max_readable);
-
 
         unsafe {
             ptr::copy_nonoverlapping(self.buffer.as_ptr().offset(self.offset as isize),
@@ -244,48 +241,43 @@ impl ReaderBuffer {
         if (out.len() as u16) < remaining_plaintext {
             // we have more plaintext, but the `out` buffer is full
             self.offset = offset;
-            println!("{}", "  << leaving read_to with more plaintext available");
             return max_readable as usize;
         } else {
             // we don't have more plaintext to fill the outbuffer
 
             if self.last < offset + CYPHER_HEADER_SIZE as u16 {
                 self.mode = WaitingForHeader;
-                println!("{}", "  << waiting for header");
             } else {
                 // decrypt header to see whether we have a full packet buffered
                 if !self.decrypt_header_at(key, nonce, offset) {
-                    self.err = BufErr::UnauthenticatedHeader;
+                    self.set_err(BufErr::UnauthenticatedHeader);
                     return max_readable as usize;
                 }
 
                 let plain_header = self.plain_header_at(offset);
                 if plain_header.is_final_header() {
-                    self.err = BufErr::FinalHeader;
+                    self.set_err(BufErr::FinalHeader);
                     return max_readable as usize;
                 }
 
                 let cypher_packet_len = self.cypher_packet_len_at(offset);
 
                 if cypher_packet_len > MAX_PACKET_SIZE {
-                    self.err = BufErr::InvalidLength;
+                    self.set_err(BufErr::InvalidLength);
                     return max_readable as usize;
                 }
 
                 if cypher_packet_len + offset + (CYPHER_HEADER_SIZE as u16) > self.last {
                     self.mode = WaitingForPacket;
-                    println!("{}", "  << waiting for packet");
                 } else {
                     if !self.decrypt_packet_at(key, nonce, offset) {
-                        self.err = BufErr::UnauthenticatedPacket;
+                        self.set_err(BufErr::UnauthenticatedPacket);
                         return max_readable as usize;
                     }
-                    println!("  << decrypted packet at {}", offset);
                 }
             }
 
             self.shift_left(offset);
-            println!("{}", "      shifted left");
 
             return max_readable as usize;
         }
@@ -308,21 +300,18 @@ impl ReaderBuffer {
         } else {
             if self.mode == WaitingForHeader {
                 if !self.decrypt_header_at(key, nonce, 0) {
-                    self.err = BufErr::UnauthenticatedHeader;
-                    return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER));
+                    return Err(self.set_err(BufErr::UnauthenticatedHeader));
                 }
             }
             let plain_header = self.plain_header_at(0);
             if plain_header.is_final_header() {
-                self.err = BufErr::FinalHeader;
-                return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
+                return Err(self.set_err(BufErr::FinalHeader));
             }
 
             let cypher_packet_len = self.cypher_packet_len_at(0);
 
             if cypher_packet_len > MAX_PACKET_SIZE {
-                self.err = BufErr::InvalidLength;
-                return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH));
+                return Err(self.set_err(BufErr::InvalidLength));
             }
 
             if self.last < CYPHER_HEADER_SIZE as u16 + cypher_packet_len {
@@ -330,8 +319,7 @@ impl ReaderBuffer {
                 return Ok(());
             } else {
                 if !self.decrypt_packet_at(key, nonce, 0) {
-                    self.err = BufErr::InvalidLength;
-                    return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET));
+                    return Err(self.set_err(BufErr::UnauthenticatedPacket));
                 }
                 return Ok(());
             }
@@ -347,18 +335,6 @@ fn do_read<R: Read>(out: &mut [u8],
                     buffer: &mut ReaderBuffer)
                     -> io::Result<usize> {
     match buffer.err {
-        BufErr::FinalHeader => {
-            return Err(io::Error::new(ErrorKind::Other, FINAL_ERROR));
-        }
-        BufErr::InvalidLength => {
-            return Err(io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH));
-        }
-        BufErr::UnauthenticatedHeader => {
-            return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER));
-        }
-        BufErr::UnauthenticatedPacket => {
-            return Err(io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET));
-        }
         BufErr::None => {
             let mut total_read = 0;
             if buffer.mode.is_waiting() {
@@ -369,18 +345,30 @@ fn do_read<R: Read>(out: &mut [u8],
                 if buffer.err != BufErr::None {
                     break;
                 }
-                println!("total_read: {:?}", total_read);
-                println!("out.len(): {:?}", out.len());
                 if total_read >= out.len() {
                     break;
                 }
                 total_read += buffer.read_to(&mut out[total_read..], key, nonce);
-                println!("  returned from read_to in mode {:?}", buffer.mode);
             }
 
-            println!("return from do_read: {:?}\n", total_read);
+            Ok(total_read)
+        }
+        _ => Err(make_io_error(&buffer.err)),
+    }
+}
 
-            return Ok(total_read);
+fn make_io_error(e: &BufErr) -> io::Error {
+    match e {
+        &BufErr::FinalHeader => io::Error::new(ErrorKind::Other, FINAL_ERROR),
+        &BufErr::InvalidLength => io::Error::new(ErrorKind::InvalidData, INVALID_LENGTH),
+        &BufErr::UnauthenticatedHeader => {
+            io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_HEADER)
+        }
+        &BufErr::UnauthenticatedPacket => {
+            io::Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET)
+        }
+        &BufErr::None => {
+            unreachable!();
         }
     }
 }
