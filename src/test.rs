@@ -315,10 +315,11 @@ fn test_writer_shutdown() {
 
     // call shutdown with buffered data
     // the next inner write errors, shutdown should propagate the error and not call inner.flush()
-    assert_eq!(b.shutdown().unwrap_err().kind(), ErrorKind::WouldBlock);
+    assert_eq!(b.write_final_header().unwrap_err().kind(),
+               ErrorKind::WouldBlock);
     assert_eq!(b.get_ref().get_flush_count(), 0);
     // the next shutdown flushes the buffer (needing two reads) and then calls inner.flush()
-    assert_eq!(b.shutdown().unwrap(), ());
+    assert_eq!(b.write_final_header().unwrap(), ());
     assert_eq!(b.get_ref().get_flush_count(), 1);
     assert_eq!(b.get_ref().inner().len(), 4 + 2 * CYPHER_HEADER_SIZE);
 }
@@ -618,7 +619,7 @@ fn test_reader_final_fill() {
     let inner = Vec::new();
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
-    assert!(b.shutdown().is_ok());
+    assert!(b.write_final_header().is_ok());
     let data = b.into_inner();
 
     let mut r = TestReader::new();
@@ -647,7 +648,7 @@ fn test_reader_final_read_to() {
     let mut b = BoxWriter::new(inner, key.clone(), nonce.clone());
 
     assert!(b.write(&plain_data).is_ok());
-    assert!(b.shutdown().is_ok());
+    assert!(b.write_final_header().is_ok());
     let data = b.into_inner();
 
     let mut r = TestReader::new();
