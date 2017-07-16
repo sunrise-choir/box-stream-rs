@@ -2,6 +2,10 @@
 name = "box_stream"
 version = "0.1.0"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
+description = "Implementation of the box-stream encryption protocol."
+repository = "https://github.com/AljoschaMeyer/box-stream-rs"
+readme = "README.md"
+license = "GPL"
 
 [dependencies]
 libc = "0.2"
