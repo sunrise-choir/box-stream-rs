@@ -1,11 +1,12 @@
 # Box-Stream
 
-Rust bindings to [box-stream-c](https://github.com/AljoschaMeyer/box-stream-c).
+Rust wrapper around [box-stream-c](https://github.com/AljoschaMeyer/box-stream-c).
 
 ### Documentation
 
-TODO host docs at github pages and link to them
-TODO add examples directory and include interoperability examples with the js implementation.
+[API documentation](https://docs.rs/box_stream)
+
+The `examples` directory contains a simple client/server pair.
 
 ### Building
 
