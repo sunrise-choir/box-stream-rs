@@ -6,7 +6,6 @@ description = "Implementation of the box-stream encryption protocol."
 repository = "https://github.com/AljoschaMeyer/box-stream-rs"
 readme = "README.md"
 license = "GPL-3.0"
-license-file = "LICENSE"
 
 [dependencies]
 libc = "0.2"
