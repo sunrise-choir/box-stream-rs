@@ -10,7 +10,8 @@ use impl_writing::*;
 /// Wraps a duplex stream, encrypting all writes and decrypting all reads.
 pub struct BoxDuplex<S: Write + Read> {
     inner: S,
-    key: secretbox::Key,
+    encryption_key: secretbox::Key,
+    decryption_key: secretbox::Key,
     decryption_nonce: secretbox::Nonce,
     encryption_nonce: secretbox::Nonce,
     reader_buffer: ReaderBuffer,
@@ -18,14 +19,20 @@ pub struct BoxDuplex<S: Write + Read> {
 }
 
 impl<S: Write + Read> BoxDuplex<S> {
-    /// Create a new duplex stream, wrapping `inner` and using `key` and `nonce`
-    /// for encryption and decryption.
-    pub fn new(inner: S, key: secretbox::Key, nonce: secretbox::Nonce) -> BoxDuplex<S> {
+    /// Create a new duplex stream, wrapping `inner` and the supplied keys and
+    /// nonces for encryption and decryption.
+    pub fn new(inner: S,
+               encryption_key: secretbox::Key,
+               decryption_key: secretbox::Key,
+               encryption_nonce: secretbox::Nonce,
+               decryption_nonce: secretbox::Nonce)
+               -> BoxDuplex<S> {
         BoxDuplex {
             inner,
-            key,
-            encryption_nonce: nonce,
-            decryption_nonce: nonce,
+            encryption_key,
+            decryption_key,
+            encryption_nonce,
+            decryption_nonce,
             reader_buffer: ReaderBuffer::new(),
             writer_buffer: WriterBuffer::new(),
         }
@@ -58,7 +65,7 @@ impl<S: Write + Read> BoxDuplex<S> {
     /// returns `Ok(())` the final header is guaranteed to have been written.
     pub fn write_final_header(&mut self) -> io::Result<()> {
         do_shutdown(&mut self.inner,
-                    &self.key,
+                    &self.encryption_key,
                     &mut self.encryption_nonce,
                     &mut self.writer_buffer)
     }
@@ -79,7 +86,7 @@ impl<S: Read + Write> Read for BoxDuplex<S> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         do_read(buf,
                 &mut self.inner,
-                &self.key,
+                &self.decryption_key,
                 &mut self.decryption_nonce,
                 &mut self.reader_buffer)
     }
@@ -89,7 +96,7 @@ impl<S: Read + Write> Write for BoxDuplex<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         do_write(buf,
                  &mut self.inner,
-                 &self.key,
+                 &self.encryption_key,
                  &mut self.encryption_nonce,
                  &mut self.writer_buffer)
     }
