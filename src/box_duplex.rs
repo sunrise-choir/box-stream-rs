@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::io;
 use sodiumoxide::crypto::secretbox;
-use futures::{Poll, Async};
+use futures::Poll;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use impl_reading::*;
@@ -111,6 +111,6 @@ impl<AS: AsyncRead + AsyncWrite> AsyncRead for BoxDuplex<AS> {}
 impl<AS: AsyncRead + AsyncWrite> AsyncWrite for BoxDuplex<AS> {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.write_final_header());
-        Ok(Async::Ready(()))
+        self.inner.shutdown()
     }
 }

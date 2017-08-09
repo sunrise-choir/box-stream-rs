@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::io;
 use sodiumoxide::crypto::secretbox;
-use futures::{Poll, Async};
+use futures::Poll;
 use tokio_io::AsyncWrite;
 
 use impl_writing::*;
@@ -77,6 +77,6 @@ impl<W: Write> Write for BoxWriter<W> {
 impl<AW: AsyncWrite> AsyncWrite for BoxWriter<AW> {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.write_final_header());
-        Ok(Async::Ready(()))
+        self.inner.shutdown()
     }
 }
