@@ -9,15 +9,27 @@ use std::io::ErrorKind;
 use std::net::TcpListener;
 
 fn main() {
-    let key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160, 34, 190,
-                              179, 158, 14, 176, 105, 232, 238, 97, 66, 133, 194, 250, 148, 199,
-                              7, 34, 157, 174, 24]);
-    let nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114, 59, 56, 167,
-                                  63, 166, 201, 9, 50, 152, 0, 255, 226, 147]);
+    let encryption_key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160,
+                                         34, 190, 179, 158, 14, 176, 105, 232, 238, 97, 66, 133,
+                                         194, 250, 148, 199, 7, 34, 157, 174, 24]);
+    let decryption_key = secretbox::Key([162u8, 29, 153, 150, 123, 225, 10, 173, 175, 201, 160,
+                                         34, 190, 179, 158, 14, 176, 105, 232, 238, 97, 66, 133,
+                                         194, 250, 148, 199, 7, 34, 157, 174, 24]);
+    let encryption_nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114,
+                                             59, 56, 167, 63, 166, 201, 9, 50, 152, 0, 255, 226,
+                                             147]);
+
+    let decryption_nonce = secretbox::Nonce([44, 140, 79, 227, 23, 153, 202, 203, 81, 40, 114,
+                                             59, 56, 167, 63, 166, 201, 9, 50, 152, 0, 255, 226,
+                                             147]);
 
     let listener = TcpListener::bind("127.0.0.1:34254").unwrap();
     let (stream, _) = listener.accept().unwrap();
-    let mut stream = BoxDuplex::new(stream, key, nonce);
+    let mut stream = BoxDuplex::new(stream,
+                                    encryption_key,
+                                    decryption_key,
+                                    encryption_nonce,
+                                    decryption_nonce);
 
     let mut received = [0u8; 8];
     stream.read_exact(&mut received).unwrap();
