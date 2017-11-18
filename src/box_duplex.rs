@@ -4,7 +4,7 @@ use sodiumoxide::crypto::secretbox;
 use futures::Poll;
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use impl_reading::*;
+use decryptor::*;
 use impl_writing::*;
 
 /// Wraps a duplex stream, encrypting all writes and decrypting all reads.
@@ -14,7 +14,7 @@ pub struct BoxDuplex<S: Write + Read> {
     decryption_key: secretbox::Key,
     decryption_nonce: secretbox::Nonce,
     encryption_nonce: secretbox::Nonce,
-    reader_buffer: ReaderBuffer,
+    decryptor: Decryptor,
     writer_buffer: WriterBuffer,
 }
 
@@ -33,7 +33,7 @@ impl<S: Write + Read> BoxDuplex<S> {
             decryption_key,
             encryption_nonce,
             decryption_nonce,
-            reader_buffer: ReaderBuffer::new(),
+            decryptor: Decryptor::new(),
             writer_buffer: WriterBuffer::new(),
         }
     }
@@ -72,23 +72,25 @@ impl<S: Write + Read> BoxDuplex<S> {
 }
 
 impl<S: Read + Write> Read for BoxDuplex<S> {
-    /// Read bytes from the wrapped stream and decrypt them.
+    /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
+    /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
     /// # Errors
-    /// In addition to propagating all errors from the wrapped stream, a
-    /// `BoxDuplex` produces the following error kinds:
+    /// In addition to propagating all errors from the wrapped reader, a
+    /// `BoxReader` produces the following error kinds:
     ///
     /// - `ErrorKind::InvalidData`: If data could not be decrypted, or if a
     /// header declares an invalid length. Possible error values are
     /// `INVALID_LENGTH`, `UNAUTHENTICATED_HEADER`, `UNAUTHENTICATED_PACKET`.
-    /// - `ErrorKind::Other`: This is used to signal that a final header has
-    /// been read. In this case, the error value is `FINAL_ERROR`.
+    /// `ErrorKind::UnexpectedEof`: If a call to the inner reader returned `Ok(0)` although it was
+    /// given a buffer of nonzero length. This is an error since end of file must be signalled via
+    /// a special header in a box stream. The error value for this is `UNAUTHENTICATED_EOF`.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        do_read(buf,
-                &mut self.inner,
-                &self.decryption_key,
-                &mut self.decryption_nonce,
-                &mut self.reader_buffer)
+        self.decryptor
+            .read(buf,
+                  &mut self.inner,
+                  &self.decryption_key,
+                  &mut self.decryption_nonce)
     }
 }
 

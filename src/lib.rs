@@ -13,12 +13,13 @@ extern crate tokio_io;
 
 pub mod crypto;
 mod impl_writing;
-mod impl_reading;
 mod box_writer;
 mod box_reader;
 mod box_duplex;
+mod decryptor;
 
-pub use impl_reading::{FINAL_ERROR, INVALID_LENGTH, UNAUTHENTICATED_HEADER, UNAUTHENTICATED_PACKET};
+pub use decryptor::{UNAUTHENTICATED_EOF, INVALID_LENGTH, UNAUTHENTICATED_HEADER,
+                    UNAUTHENTICATED_PACKET};
 
 pub use box_writer::*;
 pub use box_reader::*;

@@ -4,8 +4,10 @@
 use sodiumoxide::crypto::secretbox;
 
 /// The size of an encrypted header: The header's mac, the length of the
-/// following packet, and the max of the following packet.
+/// following packet, and the mac of the following packet.
 pub const CYPHER_HEADER_SIZE: usize = secretbox::MACBYTES + 2 + secretbox::MACBYTES;
+/// CYPHER_HEADER_SIZE as a u16
+pub const CYPHER_HEADER_SIZE_U16: u16 = CYPHER_HEADER_SIZE as u16;
 /// The maximum allowed size of a single packet passed to `encrypt_packet`.
 pub const MAX_PACKET_SIZE: u16 = 4096;
 /// Same as `MAX_PACKET_SIZE`, but as a `usize`.

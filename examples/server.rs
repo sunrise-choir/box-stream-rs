@@ -5,7 +5,6 @@ use box_stream::*;
 use sodiumoxide::crypto::secretbox;
 
 use std::io::prelude::*;
-use std::io::ErrorKind;
 use std::net::TcpListener;
 
 fn main() {
@@ -39,7 +38,6 @@ fn main() {
         .write_all(&[8u8, 9, 10, 11, 12, 13, 14, 15])
         .unwrap();
 
-    let end_of_stream = stream.read(&mut received).unwrap_err();
-    assert_eq!(end_of_stream.kind(), ErrorKind::Other);
-    assert_eq!(end_of_stream.get_ref().unwrap().description(), FINAL_ERROR);
+    let end_of_stream = stream.read(&mut received).unwrap();
+    assert_eq!(end_of_stream, 0);
 }

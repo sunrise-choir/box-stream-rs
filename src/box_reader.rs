@@ -1,18 +1,18 @@
-// Implementation of BoxReader, a wrapper for readers that decrypts all writes and handles buffering.
+// Implementation of BoxReader, a wrapper for Readers that decrypts all reads.
 
 use std::io::Read;
 use std::io;
 use sodiumoxide::crypto::secretbox;
 use tokio_io::AsyncRead;
 
-use impl_reading::*;
+use decryptor::*;
 
 /// Wraps a reader, decrypting all reads.
 pub struct BoxReader<R: Read> {
     inner: R,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
-    buffer: ReaderBuffer,
+    decryptor: Decryptor,
 }
 
 impl<R: Read> BoxReader<R> {
@@ -23,7 +23,7 @@ impl<R: Read> BoxReader<R> {
             inner,
             key,
             nonce,
-            buffer: ReaderBuffer::new(),
+            decryptor: Decryptor::new(),
         }
     }
 
@@ -46,7 +46,8 @@ impl<R: Read> BoxReader<R> {
 }
 
 impl<R: Read> Read for BoxReader<R> {
-    /// Read bytes from the wrapped reader and decrypt them.
+    /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
+    /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
     /// # Errors
     /// In addition to propagating all errors from the wrapped reader, a
@@ -55,14 +56,12 @@ impl<R: Read> Read for BoxReader<R> {
     /// - `ErrorKind::InvalidData`: If data could not be decrypted, or if a
     /// header declares an invalid length. Possible error values are
     /// `INVALID_LENGTH`, `UNAUTHENTICATED_HEADER`, `UNAUTHENTICATED_PACKET`.
-    /// - `ErrorKind::Other`: This is used to signal that a final header has
-    /// been read. In this case, the error value is `FINAL_ERROR`.
+    /// `ErrorKind::UnexpectedEof`: If a call to the inner reader returned `Ok(0)` although it was
+    /// given a buffer of nonzero length. This is an error since end of file must be signalled via
+    /// a special header in a box stream. The error value for this is `UNAUTHENTICATED_EOF`.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        do_read(buf,
-                &mut self.inner,
-                &self.key,
-                &mut self.nonce,
-                &mut self.buffer)
+        self.decryptor
+            .read(buf, &mut self.inner, &self.key, &mut self.nonce)
     }
 }
 

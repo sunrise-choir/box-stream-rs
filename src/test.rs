@@ -628,9 +628,8 @@ fn test_reader_final_fill() {
     let mut u = BoxReader::new(r, key, nonce);
     let mut buf = [0u8; MAX_PACKET_USIZE + 42];
 
-    let err = u.read(&mut buf).unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::Other);
-    assert_eq!(err.get_ref().unwrap().description(), FINAL_ERROR);
+    let done = u.read(&mut buf).unwrap();
+    assert_eq!(done, 0);
 }
 
 // reader signals a final header via an error (detected in the read_to method)
@@ -659,9 +658,8 @@ fn test_reader_final_read_to() {
 
     assert_eq!(u.read(&mut buf).unwrap(), 8);
     assert_eq!(buf[..8], plain_data[..]);
-    let err = u.read(&mut buf).unwrap_err();
-    assert_eq!(err.kind(), ErrorKind::Other);
-    assert_eq!(err.get_ref().unwrap().description(), FINAL_ERROR);
+    let done = u.read(&mut buf).unwrap();
+    assert_eq!(done, 0);
 }
 
 // error if a header claims a packet length greater than MAX_PACKET_SIZE (detected in the fill method)
