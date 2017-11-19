@@ -5,7 +5,6 @@ use std::ptr::copy_nonoverlapping;
 
 use sodiumoxide::crypto::secretbox;
 use sodiumoxide::utils::memzero;
-use tokio_io::AsyncRead;
 
 use crypto::{CYPHER_HEADER_SIZE, CYPHER_HEADER_SIZE_U16, MAX_PACKET_SIZE, MAX_PACKET_USIZE,
              PlainHeader, decrypt_header_inplace, decrypt_packet_inplace};
@@ -24,7 +23,7 @@ pub const UNAUTHENTICATED_PACKET: &'static str = "packet_auth";
 /// The error value signaling that the box stream reached an unauthenticated eof.
 pub const UNAUTHENTICATED_EOF: &'static str = "unauthenticated_eof";
 
-// Implements the base functionality for creating decrypting wrappers around AsyncReadables.
+// Implements the base functionality for creating decrypting wrappers around `io::Read`s.
 pub struct Decryptor {
     // Bytes are read into this buffer and get decrypted in-place
     buffer: [u8; BUFFER_SIZE],
@@ -35,7 +34,7 @@ impl Decryptor {
     pub fn new() -> Decryptor {
         Decryptor {
             buffer: [0; BUFFER_SIZE],
-            state: State::ReadCypherHeader { offset: 0 },
+            state: ReadCypherHeader { offset: 0 },
         }
     }
 

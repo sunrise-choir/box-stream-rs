@@ -4,21 +4,21 @@ use sodiumoxide::crypto::secretbox;
 use futures::Poll;
 use tokio_io::{AsyncRead, AsyncWrite};
 
+use encryptor::*;
 use decryptor::*;
-use impl_writing::*;
 
 /// Wraps a duplex stream, encrypting all writes and decrypting all reads.
-pub struct BoxDuplex<S: Write + Read> {
+pub struct BoxDuplex<S> {
     inner: S,
     encryption_key: secretbox::Key,
     decryption_key: secretbox::Key,
     decryption_nonce: secretbox::Nonce,
     encryption_nonce: secretbox::Nonce,
+    encryptor: Encryptor,
     decryptor: Decryptor,
-    writer_buffer: WriterBuffer,
 }
 
-impl<S: Write + Read> BoxDuplex<S> {
+impl<S> BoxDuplex<S> {
     /// Create a new duplex stream, wrapping `inner` and the supplied keys and
     /// nonces for encryption and decryption.
     pub fn new(inner: S,
@@ -33,8 +33,8 @@ impl<S: Write + Read> BoxDuplex<S> {
             decryption_key,
             encryption_nonce,
             decryption_nonce,
+            encryptor: Encryptor::new(),
             decryptor: Decryptor::new(),
-            writer_buffer: WriterBuffer::new(),
         }
     }
 
@@ -55,7 +55,9 @@ impl<S: Write + Read> BoxDuplex<S> {
     pub fn into_inner(self) -> S {
         self.inner
     }
+}
 
+impl<S: Write> BoxDuplex<S> {
     /// Tries to write a final header, indicating the end of the connection.
     /// This will flush all internally buffered data before writing the header.
     ///
@@ -64,14 +66,14 @@ impl<S: Write + Read> BoxDuplex<S> {
     /// If this returns an error, it may be safely called again. Only once this
     /// returns `Ok(())` the final header is guaranteed to have been written.
     pub fn write_final_header(&mut self) -> io::Result<()> {
-        do_shutdown(&mut self.inner,
-                    &self.encryption_key,
-                    &mut self.encryption_nonce,
-                    &mut self.writer_buffer)
+        self.encryptor
+            .shutdown(&mut self.inner,
+                      &self.encryption_key,
+                      &mut self.encryption_nonce)
     }
 }
 
-impl<S: Read + Write> Read for BoxDuplex<S> {
+impl<S: Read> Read for BoxDuplex<S> {
     /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
     /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
@@ -94,23 +96,26 @@ impl<S: Read + Write> Read for BoxDuplex<S> {
     }
 }
 
-impl<S: Read + Write> Write for BoxDuplex<S> {
+impl<S: Write> Write for BoxDuplex<S> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        do_write(buf,
-                 &mut self.inner,
-                 &self.encryption_key,
-                 &mut self.encryption_nonce,
-                 &mut self.writer_buffer)
+        self.encryptor
+            .write(buf,
+                   &mut self.inner,
+                   &self.encryption_key,
+                   &mut self.encryption_nonce)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        do_flush(&mut self.inner, &mut self.writer_buffer)
+        self.encryptor
+            .flush(&mut self.inner,
+                   &self.encryption_key,
+                   &mut self.encryption_nonce)
     }
 }
 
-impl<AS: AsyncRead + AsyncWrite> AsyncRead for BoxDuplex<AS> {}
+impl<AS: AsyncRead> AsyncRead for BoxDuplex<AS> {}
 
-impl<AS: AsyncRead + AsyncWrite> AsyncWrite for BoxDuplex<AS> {
+impl<AS: AsyncWrite> AsyncWrite for BoxDuplex<AS> {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.write_final_header());
         self.inner.shutdown()

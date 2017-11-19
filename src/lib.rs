@@ -12,11 +12,11 @@ extern crate futures;
 extern crate tokio_io;
 
 pub mod crypto;
-mod impl_writing;
 mod box_writer;
 mod box_reader;
 mod box_duplex;
 mod decryptor;
+mod encryptor;
 
 pub use decryptor::{UNAUTHENTICATED_EOF, INVALID_LENGTH, UNAUTHENTICATED_HEADER,
                     UNAUTHENTICATED_PACKET};

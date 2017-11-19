@@ -6,14 +6,14 @@ use sodiumoxide::crypto::secretbox;
 use futures::Poll;
 use tokio_io::AsyncWrite;
 
-use impl_writing::*;
+use encryptor::*;
 
 /// Wraps a writer, encrypting all writes.
 pub struct BoxWriter<W: Write> {
     inner: W,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
-    buffer: WriterBuffer,
+    encryptor: Encryptor,
 }
 
 impl<W: Write> BoxWriter<W> {
@@ -24,7 +24,7 @@ impl<W: Write> BoxWriter<W> {
             inner,
             key,
             nonce,
-            buffer: WriterBuffer::new(),
+            encryptor: Encryptor::new(),
         }
     }
 
@@ -53,28 +53,26 @@ impl<W: Write> BoxWriter<W> {
     /// If this returns an error, it may be safely called again. Only once this
     /// returns `Ok(())` the final header is guaranteed to have been written.
     pub fn write_final_header(&mut self) -> io::Result<()> {
-        do_shutdown(&mut self.inner,
-                    &self.key,
-                    &mut self.nonce,
-                    &mut self.buffer)
+        self.encryptor
+            .shutdown(&mut self.inner, &self.key, &mut self.nonce)
     }
 }
 
 impl<W: Write> Write for BoxWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        do_write(buf,
-                 &mut self.inner,
-                 &self.key,
-                 &mut self.nonce,
-                 &mut self.buffer)
+        self.encryptor
+            .write(buf, &mut self.inner, &self.key, &mut self.nonce)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        do_flush(&mut self.inner, &mut self.buffer)
+        self.encryptor
+            .flush(&mut self.inner, &self.key, &mut self.nonce)
     }
 }
 
 impl<AW: AsyncWrite> AsyncWrite for BoxWriter<AW> {
+    /// This calls `self.write_final_header()` before shutting down the inner
+    /// `AsyncWrite`.
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.write_final_header());
         self.inner.shutdown()
