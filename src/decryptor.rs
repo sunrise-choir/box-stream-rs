@@ -78,12 +78,13 @@ impl Decryptor {
                         if plain_header.is_final_header() {
                             return Ok(0);
                         } else {
-                            if plain_header.get_packet_len() > MAX_PACKET_SIZE {
+                            let len = plain_header.get_packet_len();
+                            if len > MAX_PACKET_SIZE || len == 0 {
                                 return Err(Error::new(ErrorKind::InvalidData, INVALID_LENGTH));
                             } else {
                                 self.state = ReadCypherPacket {
                                     offset: 0,
-                                    length: plain_header.get_packet_len(),
+                                    length: len,
                                 };
                                 return self.read(buf, reader, key, nonce);
                             }
