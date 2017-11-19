@@ -12,16 +12,16 @@ use crypto::{CYPHER_HEADER_SIZE, CYPHER_HEADER_SIZE_U16, MAX_PACKET_SIZE, MAX_PA
 const BUFFER_SIZE: usize = CYPHER_HEADER_SIZE + MAX_PACKET_USIZE;
 
 /// The error value signaling that a header is not correctly authenticated.
-pub const UNAUTHENTICATED_HEADER: &'static str = "header_auth";
+pub const UNAUTHENTICATED_HEADER: &'static str = "read unauthenticated header";
 
 /// The error value signaling that a header claims an invalid packet length.
-pub const INVALID_LENGTH: &'static str = "invalid_length";
+pub const INVALID_LENGTH: &'static str = "read header containing invalid length";
 
 /// The error value used signaling that a packet is not correctly authenticated.
-pub const UNAUTHENTICATED_PACKET: &'static str = "packet_auth";
+pub const UNAUTHENTICATED_PACKET: &'static str = "read unauthenticated packet";
 
 /// The error value signaling that the box stream reached an unauthenticated eof.
-pub const UNAUTHENTICATED_EOF: &'static str = "unauthenticated_eof";
+pub const UNAUTHENTICATED_EOF: &'static str = "reached unauthenticated eof";
 
 // Implements the base functionality for creating decrypting wrappers around `io::Read`s.
 pub struct Decryptor {
