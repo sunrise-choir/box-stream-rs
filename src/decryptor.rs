@@ -23,6 +23,19 @@ pub const UNAUTHENTICATED_PACKET: &'static str = "read unauthenticated packet";
 /// The error value signaling that the box stream reached an unauthenticated eof.
 pub const UNAUTHENTICATED_EOF: &'static str = "reached unauthenticated eof";
 
+// TODO move to utils
+macro_rules! retry {
+    ($e:expr) => (
+        loop {
+            match $e {
+                Ok(t) => break t,
+                Err(ref e) if e.kind() == ::std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    )
+}
+
 // Implements the base functionality for creating decrypting wrappers around `io::Read`s.
 pub struct Decryptor {
     // Bytes are read into this buffer and get decrypted in-place
@@ -75,7 +88,9 @@ impl Decryptor {
                     if is_header_valid {
                         let plain_header = unsafe { self.plain_header() };
 
+                        println!("about to check whether header is final");
                         if plain_header.is_final_header() {
+                            println!("header is final");
                             return Ok(0);
                         } else {
                             let len = plain_header.get_packet_len();
@@ -98,6 +113,7 @@ impl Decryptor {
             ReadCypherPacket { offset, length } => {
                 debug_assert!(offset < length);
                 debug_assert!(length <= MAX_PACKET_SIZE);
+                println!("read ReadCypherPacket at offset {}", offset);
 
                 let new_offset = offset +
                                  (read_nonzero(reader,
@@ -105,7 +121,7 @@ impl Decryptor {
                                                     CYPHER_HEADER_SIZE +
                                                     (length as usize)])? as
                                   u16);
-
+                println!("new offset {}", new_offset);
                 if new_offset < length {
                     self.state = ReadCypherPacket {
                         offset: new_offset,
@@ -213,7 +229,7 @@ use decryptor::State::*;
 // Helper function which delegates to `Reader::read`, but returns an Error of kind UnexpectedEof
 // if zero bytes were read although `buf` had length greater than 0.
 fn read_nonzero<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<usize, Error> {
-    let read = r.read(buf)?;
+    let read = retry!(r.read(buf));
     if read == 0 && buf.len() > 0 {
         return Err(Error::new(ErrorKind::UnexpectedEof, UNAUTHENTICATED_EOF));
     } else {
