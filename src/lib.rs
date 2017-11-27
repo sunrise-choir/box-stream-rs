@@ -10,6 +10,8 @@ extern crate sodiumoxide;
 extern crate futures;
 #[macro_use]
 extern crate tokio_io;
+#[macro_use]
+extern crate atm_io_utils;
 
 pub mod crypto;
 mod box_writer;
@@ -28,7 +30,6 @@ pub use box_duplex::*;
 #[cfg(test)]
 extern crate partial_io;
 #[cfg(test)]
-#[macro_use]
 extern crate quickcheck;
 #[cfg(test)]
 extern crate async_ringbuffer;

@@ -88,9 +88,7 @@ impl Decryptor {
                     if is_header_valid {
                         let plain_header = unsafe { self.plain_header() };
 
-                        println!("about to check whether header is final");
                         if plain_header.is_final_header() {
-                            println!("header is final");
                             return Ok(0);
                         } else {
                             let len = plain_header.get_packet_len();
@@ -113,7 +111,6 @@ impl Decryptor {
             ReadCypherPacket { offset, length } => {
                 debug_assert!(offset < length);
                 debug_assert!(length <= MAX_PACKET_SIZE);
-                println!("read ReadCypherPacket at offset {}", offset);
 
                 let new_offset = offset +
                                  (read_nonzero(reader,
@@ -121,7 +118,6 @@ impl Decryptor {
                                                     CYPHER_HEADER_SIZE +
                                                     (length as usize)])? as
                                   u16);
-                println!("new offset {}", new_offset);
                 if new_offset < length {
                     self.state = ReadCypherPacket {
                         offset: new_offset,

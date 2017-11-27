@@ -13,6 +13,7 @@ libsodium-sys = "0.0.15"
 sodiumoxide = "0.0.15"
 tokio-io = "0.1.2"
 futures = "0.1.14"
+atm-io-utils = "0.1.0"
 
 [dev-dependencies]
 partial-io = { version = "0.2.5", features = ["quickcheck", "tokio"] }
