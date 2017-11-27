@@ -8,14 +8,14 @@ use tokio_io::AsyncRead;
 use decryptor::*;
 
 /// Wraps a reader, decrypting all reads.
-pub struct BoxReader<R: Read> {
+pub struct BoxReader<R> {
     inner: R,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
     decryptor: Decryptor,
 }
 
-impl<R: Read> BoxReader<R> {
+impl<R> BoxReader<R> {
     /// Create a new reader, wrapping `inner` and using `key` and `nonce` for
     /// decryption.
     pub fn new(inner: R, key: secretbox::Key, nonce: secretbox::Nonce) -> BoxReader<R> {

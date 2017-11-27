@@ -57,7 +57,7 @@ impl<S> BoxDuplex<S> {
     }
 }
 
-impl<S: Write> BoxDuplex<S> {
+impl<W: Write> BoxDuplex<W> {
     /// Tries to write a final header, indicating the end of the connection.
     /// This will flush all internally buffered data before writing the header.
     ///
@@ -73,7 +73,7 @@ impl<S: Write> BoxDuplex<S> {
     }
 }
 
-impl<S: Read> Read for BoxDuplex<S> {
+impl<R: Read> Read for BoxDuplex<R> {
     /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
     /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
@@ -96,7 +96,7 @@ impl<S: Read> Read for BoxDuplex<S> {
     }
 }
 
-impl<S: Write> Write for BoxDuplex<S> {
+impl<W: Write> Write for BoxDuplex<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.encryptor
             .write(buf,
@@ -113,9 +113,9 @@ impl<S: Write> Write for BoxDuplex<S> {
     }
 }
 
-impl<AS: AsyncRead> AsyncRead for BoxDuplex<AS> {}
+impl<AR: AsyncRead> AsyncRead for BoxDuplex<AR> {}
 
-impl<AS: AsyncWrite> AsyncWrite for BoxDuplex<AS> {
+impl<AW: AsyncWrite> AsyncWrite for BoxDuplex<AW> {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.write_final_header());
         self.inner.shutdown()

@@ -1,4 +1,4 @@
-// Implementation of BoxWriter, a wrapper for writers that encrypts all writes and handles buffering, flushing etc.
+// Implementation of BoxWriter, a wrapper for writers that encrypts all writes.
 
 use std::io::Write;
 use std::io;
@@ -9,14 +9,14 @@ use tokio_io::AsyncWrite;
 use encryptor::*;
 
 /// Wraps a writer, encrypting all writes.
-pub struct BoxWriter<W: Write> {
+pub struct BoxWriter<W> {
     inner: W,
     key: secretbox::Key,
     nonce: secretbox::Nonce,
     encryptor: Encryptor,
 }
 
-impl<W: Write> BoxWriter<W> {
+impl<W> BoxWriter<W> {
     /// Create a new writer, wrapping `inner` and using `key` and `nonce` for
     /// encryption.
     pub fn new(inner: W, key: secretbox::Key, nonce: secretbox::Nonce) -> BoxWriter<W> {
@@ -44,7 +44,9 @@ impl<W: Write> BoxWriter<W> {
     pub fn into_inner(self) -> W {
         self.inner
     }
+}
 
+impl<W: Write> BoxWriter<W> {
     /// Tries to write a final header, indicating the end of the connection.
     /// This will flush all internally buffered data before writing the header.
     ///

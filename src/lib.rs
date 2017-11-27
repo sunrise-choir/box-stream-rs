@@ -1,7 +1,6 @@
 //! Implementation of the [box-stream](https://github.com/dominictarr/pull-box-stream)
-//! encryption protocol. This crate provides structs which wrap readers and/or
-//! writers, decrypting all reads and encrypting all writes. Also provides
-//! [tokio](https://tokio.rs/)'s asynchronous reade and write traits.
+//! encryption protocol. This crate provides structs which wrap (async) readers and/or
+//! writers, decrypting all reads and encrypting all writes.
 
 #![deny(missing_docs)]
 
