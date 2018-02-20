@@ -10,7 +10,7 @@ license = "GPL-3.0"
 [dependencies]
 libc = "0.2"
 libsodium-sys = "0.0.16"
-sodiumoxide = "0.0.15"
+sodiumoxide = "0.0.16"
 tokio-io = "0.1.2"
 futures = "0.1.14"
 atm-io-utils = "0.1.0"
