@@ -1,8 +1,7 @@
-use std::io::{Read, Write};
-use std::io;
+use futures_core::Poll;
+use futures_core::task::Context;
+use futures_io::{Error, AsyncRead, AsyncWrite};
 use sodiumoxide::crypto::secretbox;
-use futures::Poll;
-use tokio_io::{AsyncRead, AsyncWrite};
 
 use encryptor::*;
 use decryptor::*;
@@ -57,23 +56,7 @@ impl<S> BoxDuplex<S> {
     }
 }
 
-impl<W: Write> BoxDuplex<W> {
-    /// Tries to write a final header, indicating the end of the connection.
-    /// This will flush all internally buffered data before writing the header.
-    ///
-    /// After this has returned `Ok(())`, no further `write` or `flush` methods
-    /// of the `BoxDuplex` may be called.
-    /// If this returns an error, it may be safely called again. Only once this
-    /// returns `Ok(())` the final header is guaranteed to have been written.
-    pub fn write_final_header(&mut self) -> io::Result<()> {
-        self.encryptor
-            .shutdown(&mut self.inner,
-                      &self.encryption_key,
-                      &mut self.encryption_nonce)
-    }
-}
-
-impl<R: Read> Read for BoxDuplex<R> {
+impl<R: AsyncRead> AsyncRead for BoxDuplex<R> {
     /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
     /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
@@ -87,37 +70,39 @@ impl<R: Read> Read for BoxDuplex<R> {
     /// `ErrorKind::UnexpectedEof`: If a call to the inner reader returned `Ok(0)` although it was
     /// given a buffer of nonzero length. This is an error since end of file must be signalled via
     /// a special header in a box stream. The error value for this is `UNAUTHENTICATED_EOF`.
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut [u8]) -> Poll<usize, Error> {
         self.decryptor
-            .read(buf,
-                  &mut self.inner,
-                  &self.decryption_key,
-                  &mut self.decryption_nonce)
+            .poll_read(cx,
+                       buf,
+                       &mut self.inner,
+                       &self.decryption_key,
+                       &mut self.decryption_nonce)
     }
 }
 
-impl<W: Write> Write for BoxDuplex<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+impl<W: AsyncWrite> AsyncWrite for BoxDuplex<W> {
+    fn poll_write(&mut self, cx: &mut Context, buf: &[u8]) -> Poll<usize, Error> {
         self.encryptor
-            .write(buf,
-                   &mut self.inner,
-                   &self.encryption_key,
-                   &mut self.encryption_nonce)
+            .poll_write(cx,
+                        buf,
+                        &mut self.inner,
+                        &self.encryption_key,
+                        &mut self.encryption_nonce)
     }
 
-    fn flush(&mut self) -> io::Result<()> {
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<(), Error> {
         self.encryptor
-            .flush(&mut self.inner,
-                   &self.encryption_key,
-                   &mut self.encryption_nonce)
+            .poll_flush(cx,
+                        &mut self.inner,
+                        &self.encryption_key,
+                        &mut self.encryption_nonce)
     }
-}
 
-impl<AR: AsyncRead> AsyncRead for BoxDuplex<AR> {}
-
-impl<AW: AsyncWrite> AsyncWrite for BoxDuplex<AW> {
-    fn shutdown(&mut self) -> Poll<(), io::Error> {
-        try_nb!(self.write_final_header());
-        self.inner.shutdown()
+    fn poll_close(&mut self, cx: &mut Context) -> Poll<(), Error> {
+        self.encryptor
+            .poll_close(cx,
+                        &mut self.inner,
+                        &self.encryption_key,
+                        &mut self.encryption_nonce)
     }
 }

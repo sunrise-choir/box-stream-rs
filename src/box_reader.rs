@@ -1,9 +1,9 @@
 // Implementation of BoxReader, a wrapper for Readers that decrypts all reads.
 
-use std::io::Read;
-use std::io;
+use futures_core::Poll;
+use futures_core::task::Context;
+use futures_io::{Error, AsyncRead};
 use sodiumoxide::crypto::secretbox;
-use tokio_io::AsyncRead;
 
 use decryptor::*;
 
@@ -45,7 +45,7 @@ impl<R> BoxReader<R> {
     }
 }
 
-impl<R: Read> Read for BoxReader<R> {
+impl<R: AsyncRead> AsyncRead for BoxReader<R> {
     /// Read bytes from the wrapped reader and decrypt them. End of stream is signalled by
     /// returning `Ok(0)` even though this function was passed a buffer of nonzero length.
     ///
@@ -59,10 +59,8 @@ impl<R: Read> Read for BoxReader<R> {
     /// `ErrorKind::UnexpectedEof`: If a call to the inner reader returned `Ok(0)` although it was
     /// given a buffer of nonzero length. This is an error since end of file must be signalled via
     /// a special header in a box stream. The error value for this is `UNAUTHENTICATED_EOF`.
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut [u8]) -> Poll<usize, Error> {
         self.decryptor
-            .read(buf, &mut self.inner, &self.key, &mut self.nonce)
+            .poll_read(cx, buf, &mut self.inner, &self.key, &mut self.nonce)
     }
 }
-
-impl<AR: AsyncRead> AsyncRead for BoxReader<AR> {}

@@ -1,10 +1,9 @@
 // Implementation of BoxWriter, a wrapper for writers that encrypts all writes.
 
-use std::io::Write;
-use std::io;
+use futures_core::Poll;
+use futures_core::task::Context;
+use futures_io::{Error, AsyncWrite};
 use sodiumoxide::crypto::secretbox;
-use futures::Poll;
-use tokio_io::AsyncWrite;
 
 use encryptor::*;
 
@@ -46,37 +45,19 @@ impl<W> BoxWriter<W> {
     }
 }
 
-impl<W: Write> BoxWriter<W> {
-    /// Tries to write a final header, indicating the end of the connection.
-    /// This will flush all internally buffered data before writing the header.
-    ///
-    /// After this has returned `Ok(())`, no further methods of the `BoxWriter`
-    /// may be called.
-    /// If this returns an error, it may be safely called again. Only once this
-    /// returns `Ok(())` the final header is guaranteed to have been written.
-    pub fn write_final_header(&mut self) -> io::Result<()> {
+impl<W: AsyncWrite> AsyncWrite for BoxWriter<W> {
+    fn poll_write(&mut self, cx: &mut Context, buf: &[u8]) -> Poll<usize, Error> {
         self.encryptor
-            .shutdown(&mut self.inner, &self.key, &mut self.nonce)
-    }
-}
-
-impl<W: Write> Write for BoxWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.encryptor
-            .write(buf, &mut self.inner, &self.key, &mut self.nonce)
+            .poll_write(cx, buf, &mut self.inner, &self.key, &mut self.nonce)
     }
 
-    fn flush(&mut self) -> io::Result<()> {
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<(), Error> {
         self.encryptor
-            .flush(&mut self.inner, &self.key, &mut self.nonce)
+            .poll_flush(cx, &mut self.inner, &self.key, &mut self.nonce)
     }
-}
 
-impl<AW: AsyncWrite> AsyncWrite for BoxWriter<AW> {
-    /// This calls `self.write_final_header()` before shutting down the inner
-    /// `AsyncWrite`.
-    fn shutdown(&mut self) -> Poll<(), io::Error> {
-        try_nb!(self.write_final_header());
-        self.inner.shutdown()
+    fn poll_close(&mut self, cx: &mut Context) -> Poll<(), Error> {
+        self.encryptor
+            .poll_close(cx, &mut self.inner, &self.key, &mut self.nonce)
     }
 }

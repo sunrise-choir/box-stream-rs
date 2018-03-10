@@ -6,11 +6,9 @@
 
 extern crate libc;
 extern crate sodiumoxide;
-extern crate futures;
 #[macro_use]
-extern crate tokio_io;
-#[macro_use]
-extern crate atm_io_utils;
+extern crate futures_core;
+extern crate futures_io;
 
 pub mod crypto;
 mod box_writer;
@@ -27,13 +25,11 @@ pub use box_reader::*;
 pub use box_duplex::*;
 
 #[cfg(test)]
-extern crate partial_io;
-#[cfg(test)]
-extern crate quickcheck;
-#[cfg(test)]
 extern crate async_ringbuffer;
 #[cfg(test)]
-extern crate rand;
+extern crate atm_io_utils;
+#[cfg(test)]
+extern crate futures;
 
 #[cfg(test)]
 mod test;

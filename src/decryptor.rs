@@ -1,8 +1,11 @@
-use std::io::{Error, Read, ErrorKind};
 use std::mem::transmute;
 use std::cmp::min;
 use std::ptr::copy_nonoverlapping;
 
+use futures_core::Poll;
+use futures_core::Async::Ready;
+use futures_core::task::Context;
+use futures_io::{Error, AsyncRead, ErrorKind};
 use sodiumoxide::crypto::secretbox;
 use sodiumoxide::utils::memzero;
 
@@ -23,20 +26,7 @@ pub const UNAUTHENTICATED_PACKET: &'static str = "read unauthenticated packet";
 /// The error value signaling that the box stream reached an unauthenticated eof.
 pub const UNAUTHENTICATED_EOF: &'static str = "reached unauthenticated eof";
 
-// TODO move to utils
-macro_rules! retry {
-    ($e:expr) => (
-        loop {
-            match $e {
-                Ok(t) => break t,
-                Err(ref e) if e.kind() == ::std::io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e.into()),
-            }
-        }
-    )
-}
-
-// Implements the base functionality for creating decrypting wrappers around `io::Read`s.
+// Implements the base functionality for creating decrypting wrappers around `AsyncRead`s.
 pub struct Decryptor {
     // Bytes are read into this buffer and get decrypted in-place
     buffer: [u8; BUFFER_SIZE],
@@ -57,25 +47,28 @@ impl Decryptor {
     // and no more data will be emitted. If the underlying Read emitted 0 bytes although it was not
     // given a 0 length buffer, this results in an io::Error of kind `UnexpectedEof` (since EOF
     // must be signaled by the final header).
-    pub fn read<R: Read>(&mut self,
-                         buf: &mut [u8],
-                         reader: &mut R,
-                         key: &secretbox::Key,
-                         nonce: &mut secretbox::Nonce)
-                         -> Result<usize, Error> {
+    pub fn poll_read<R: AsyncRead>(&mut self,
+                                   cx: &mut Context,
+                                   buf: &mut [u8],
+                                   reader: &mut R,
+                                   key: &secretbox::Key,
+                                   nonce: &mut secretbox::Nonce)
+                                   -> Poll<usize, Error> {
         match self.state {
             ReadCypherHeader { offset } => {
                 debug_assert!(offset < CYPHER_HEADER_SIZE_U16);
 
                 let new_offset = offset +
-                                 (read_nonzero(reader,
-                                               &mut self.buffer[(offset as usize)..
-                                                    CYPHER_HEADER_SIZE])? as
+                                 (try_ready!(poll_read_nonzero(reader,
+                                                               cx,
+                                                               &mut self.buffer
+                                                                        [(offset as usize)..
+                                                                    CYPHER_HEADER_SIZE])) as
                                   u16);
 
                 if new_offset < CYPHER_HEADER_SIZE_U16 {
                     self.state = ReadCypherHeader { offset: new_offset };
-                    return self.read(buf, reader, key, nonce);
+                    return self.poll_read(cx, buf, reader, key, nonce);
                 } else {
                     let is_header_valid =
                         unsafe {
@@ -89,7 +82,7 @@ impl Decryptor {
                         let plain_header = unsafe { self.plain_header() };
 
                         if plain_header.is_final_header() {
-                            return Ok(0);
+                            return Ok(Ready(0));
                         } else {
                             let len = plain_header.get_packet_len();
                             if len > MAX_PACKET_SIZE || len == 0 {
@@ -99,7 +92,7 @@ impl Decryptor {
                                     offset: 0,
                                     length: len,
                                 };
-                                return self.read(buf, reader, key, nonce);
+                                return self.poll_read(cx, buf, reader, key, nonce);
                             }
                         }
                     } else {
@@ -112,18 +105,20 @@ impl Decryptor {
                 debug_assert!(offset < length);
                 debug_assert!(length <= MAX_PACKET_SIZE);
 
-                let new_offset = offset +
-                                 (read_nonzero(reader,
-                                               &mut self.buffer[CYPHER_HEADER_SIZE + (offset as usize)..
-                                                    CYPHER_HEADER_SIZE +
-                                                    (length as usize)])? as
-                                  u16);
+                let new_offset =
+                    offset +
+                    (try_ready!(poll_read_nonzero(reader,
+                                                  cx,
+                                                  &mut self.buffer[CYPHER_HEADER_SIZE + (offset as usize)..
+                                                       CYPHER_HEADER_SIZE +
+                                                       (length as usize)])) as
+                     u16);
                 if new_offset < length {
                     self.state = ReadCypherPacket {
                         offset: new_offset,
                         length: length,
                     };
-                    return self.read(buf, reader, key, nonce);
+                    return self.poll_read(cx, buf, reader, key, nonce);
                 } else {
                     let plain_header = unsafe { self.plain_header() };
 
@@ -141,7 +136,7 @@ impl Decryptor {
                             offset: 0,
                             length: length,
                         };
-                        return self.read(buf, reader, key, nonce);
+                        return self.poll_read(cx, buf, reader, key, nonce);
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, UNAUTHENTICATED_PACKET));
                     }
@@ -172,7 +167,7 @@ impl Decryptor {
                     self.state = ReadCypherHeader { offset: 0 }
                 }
 
-                return Ok(read);
+                return Ok(Ready(read));
             }
         }
     }
@@ -222,13 +217,16 @@ enum State {
 }
 use decryptor::State::*;
 
-// Helper function which delegates to `Reader::read`, but returns an Error of kind UnexpectedEof
-// if zero bytes were read although `buf` had length greater than 0.
-fn read_nonzero<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<usize, Error> {
-    let read = retry!(r.read(buf));
+// Helper function which delegates to `AsyncReader::poll_read`, but returns an Error of kind
+// UnexpectedEof if zero bytes were read although `buf` had length greater than 0.
+fn poll_read_nonzero<R: AsyncRead>(r: &mut R,
+                                   cx: &mut Context,
+                                   buf: &mut [u8])
+                                   -> Poll<usize, Error> {
+    let read = try_ready!(r.poll_read(cx, buf));
     if read == 0 && buf.len() > 0 {
         return Err(Error::new(ErrorKind::UnexpectedEof, UNAUTHENTICATED_EOF));
     } else {
-        return Ok(read);
+        return Ok(Ready(read));
     }
 }

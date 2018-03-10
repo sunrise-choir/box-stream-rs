@@ -1,6 +1,9 @@
-use std::io::{Error, Write, ErrorKind};
 use std::cmp::min;
 
+use futures_core::Poll;
+use futures_core::Async::Ready;
+use futures_core::task::Context;
+use futures_io::{Error, AsyncWrite, ErrorKind};
 use sodiumoxide::crypto::secretbox;
 use sodiumoxide::utils::memzero;
 
@@ -24,12 +27,13 @@ impl Encryptor {
     }
 
     // A Write wrapper using the encryptor should delegate to this method in its `write` implementation.
-    pub fn write<W: Write>(&mut self,
-                           buf: &[u8],
-                           writer: &mut W,
-                           key: &secretbox::Key,
-                           nonce: &mut secretbox::Nonce)
-                           -> Result<usize, Error> {
+    pub fn poll_write<W: AsyncWrite>(&mut self,
+                                     cx: &mut Context,
+                                     buf: &[u8],
+                                     writer: &mut W,
+                                     key: &secretbox::Key,
+                                     nonce: &mut secretbox::Nonce)
+                                     -> Poll<usize, Error> {
         match self.state {
             Writable => {
                 let written = min(buf.len() as u16, MAX_PACKET_SIZE);
@@ -47,16 +51,17 @@ impl Encryptor {
                     length: written,
                 };
 
-                return Ok(written as usize);
+                return Ok(Ready(written as usize));
             }
 
             WriteInner { offset, length } => {
                 debug_assert!(offset < length + CYPHER_HEADER_SIZE as u16);
                 debug_assert!(length + CYPHER_HEADER_SIZE as u16 <= BUFFER_SIZE as u16);
 
-                let written = retry!(writer.write(&self.buffer[offset as usize..
-                                                   CYPHER_HEADER_SIZE +
-                                                   length as usize]));
+                let written = try_ready!(writer.poll_write(cx,
+                                                           &self.buffer[offset as usize..
+                                                            CYPHER_HEADER_SIZE +
+                                                            length as usize]));
 
                 if written == 0 {
                     return Err(Error::new(ErrorKind::WriteZero, "failed to write data"));
@@ -71,7 +76,7 @@ impl Encryptor {
                     }
                 }
 
-                return self.write(buf, writer, key, nonce);
+                return self.poll_write(cx, buf, writer, key, nonce);
             }
 
             Shutdown { offset: _ } => {
@@ -80,23 +85,25 @@ impl Encryptor {
         }
     }
 
-    pub fn flush<W: Write>(&mut self,
-                           writer: &mut W,
-                           key: &secretbox::Key,
-                           nonce: &mut secretbox::Nonce)
-                           -> Result<(), Error> {
+    pub fn poll_flush<W: AsyncWrite>(&mut self,
+                                     cx: &mut Context,
+                                     writer: &mut W,
+                                     key: &secretbox::Key,
+                                     nonce: &mut secretbox::Nonce)
+                                     -> Poll<(), Error> {
         match self.state {
             Writable => {
-                return Ok(retry!(writer.flush()));
+                return writer.poll_flush(cx);
             }
 
             WriteInner { offset, length } => {
                 debug_assert!(offset < length + CYPHER_HEADER_SIZE as u16);
                 debug_assert!(length + CYPHER_HEADER_SIZE as u16 <= BUFFER_SIZE as u16);
 
-                let written = retry!(writer.write(&self.buffer[offset as usize..
-                                                   CYPHER_HEADER_SIZE +
-                                                   length as usize]));
+                let written = try_ready!(writer.poll_write(cx,
+                                                           &self.buffer[offset as usize..
+                                                            CYPHER_HEADER_SIZE +
+                                                            length as usize]));
 
                 if written == 0 {
                     return Err(Error::new(ErrorKind::WriteZero, "failed to write buffered data"));
@@ -111,13 +118,14 @@ impl Encryptor {
                     }
                 }
 
-                return self.flush(writer, key, nonce);
+                return self.poll_flush(cx, writer, key, nonce);
             }
 
             Shutdown { offset } => {
                 debug_assert!(offset < CYPHER_HEADER_SIZE as u16);
-                let written = retry!(writer.write(&self.buffer[offset as usize..
-                                                   CYPHER_HEADER_SIZE]));
+                let written = try_ready!(writer.poll_write(cx,
+                                                           &self.buffer[offset as usize..
+                                                            CYPHER_HEADER_SIZE]));
 
                 if written == 0 {
                     return Err(Error::new(ErrorKind::WriteZero, "failed to write final packet"));
@@ -129,19 +137,17 @@ impl Encryptor {
                     }
                 }
 
-                return self.flush(writer, key, nonce);
+                return self.poll_flush(cx, writer, key, nonce);
             }
         }
     }
 
-    // This does not call writer.shutdown(), since it should also work on Write
-    // rather than only AsyncWrite. An AsyncWrite wrapper should call this in
-    // its shutdown method and then delegate to the inner shutdown method.
-    pub fn shutdown<W: Write>(&mut self,
-                              writer: &mut W,
-                              key: &secretbox::Key,
-                              nonce: &mut secretbox::Nonce)
-                              -> Result<(), Error> {
+    pub fn poll_close<W: AsyncWrite>(&mut self,
+                                     cx: &mut Context,
+                                     writer: &mut W,
+                                     key: &secretbox::Key,
+                                     nonce: &mut secretbox::Nonce)
+                                     -> Poll<(), Error> {
         match self.state {
             Writable => {
                 unsafe {
@@ -150,19 +156,19 @@ impl Encryptor {
                                  &nonce.0);
                 }
                 self.state = Shutdown { offset: 0 };
-                return self.flush(writer, key, nonce);
+                return self.poll_flush(cx, writer, key, nonce);
             }
 
             WriteInner {
                 offset: _,
                 length: _,
             } => {
-                retry!(self.flush(writer, key, nonce));
+                let _ = try_ready!(self.poll_flush(cx, writer, key, nonce));
                 debug_assert!(self.state == Writable);
-                return self.shutdown(writer, key, nonce);
+                return self.poll_close(cx, writer, key, nonce);
             }
 
-            Shutdown { offset: _ } => return self.flush(writer, key, nonce),
+            Shutdown { offset: _ } => return self.poll_flush(cx, writer, key, nonce),
         }
 
     }
