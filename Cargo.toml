@@ -3,9 +3,9 @@ name = "box_stream"
 version = "0.5.0"
 authors = ["AljoschaMeyer <mail@aljoscha-meyer.de>"]
 description = "Implementation of the box-stream encryption protocol."
-repository = "https://github.com/AljoschaMeyer/box-stream-rs"
+repository = "https://github.com/sunrise-choir/box-stream-rs"
 readme = "README.md"
-license = "AGPL-3.0"
+license = "LGPL-3.0"
 
 [dependencies]
 libc = "0.2"
